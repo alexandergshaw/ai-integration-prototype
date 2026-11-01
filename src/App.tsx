@@ -56,10 +56,12 @@ function EvidenceRail() {
 
 function SuggestionContent({ suggestion }: { suggestion: Suggestion }) {
   if (suggestion.action === 'challenge') return <>
-    <h3>Another hypothesis to investigate</h3>
+    <h3>Documented evidence to consider</h3>
+    <p>{suggestion.evidenceConsideration}</p>
+    <h3>A possible explanation—not established</h3>
     <p>{suggestion.alternativeHypothesis}</p>
     <div className="proposed"><span className="eyebrow">PROBING QUESTION</span><p>{suggestion.probingQuestion}</p></div>
-    <h3>Proposed inquiry draft</h3><p>{suggestion.suggestedInquiry}</p>
+    <div className="proposed"><span className="eyebrow">REVISED INTERPRETATION DRAFT</span><p>{suggestion.revisedInterpretation}</p></div>
   </>
   if (suggestion.action === 'refine_inquiry') return <div className="proposed">
     <span className="eyebrow">PROPOSED PLC QUESTION</span><p>{suggestion.suggestedInquiry}</p>
@@ -71,10 +73,11 @@ function SuggestionContent({ suggestion }: { suggestion: Suggestion }) {
       <li key={index}><b>{step.minutes} min</b><span>{step.instruction}</span></li>)}</ol>
     <details className="activity-detail"><summary>Representation & facilitation</summary>
       <p>{suggestion.activity.representation}</p>
-      <h4>Facilitator question</h4><p>{suggestion.activity.facilitatorQuestion}</p>
+      <h4>Mathematical discussion prompts</h4>
+      <ol>{suggestion.activity.discussionPrompts.map((prompt) => <li key={prompt}>{prompt}</li>)}</ol>
       <h4>Anticipated misconception</h4><p>{suggestion.activity.anticipatedMisconception}</p>
-      <h4>Possible teacher response</h4><p>{suggestion.activity.teacherResponse}</p>
-      <h4>Implementation check</h4><p>{suggestion.activity.implementationCheck}</p>
+      <h4>What teachers should practice</h4><p>{suggestion.activity.teachersPractice}</p>
+      <h4>Student evidence to examine afterward</h4><p>{suggestion.activity.studentEvidence}</p>
     </details>
   </>
 }
@@ -206,7 +209,9 @@ export function Workspace({ onLock }: { onLock: () => void }) {
         <section className="educator-panel" aria-label="Educator workspace">
           <nav className="stepper" aria-label="Coaching steps">{(['Challenge', 'Refine', 'Rehearse'] as const).map((name, index) =>
             <button key={name} aria-current={state.step === index + 1 ? 'step' : undefined}
-              disabled={index === 1 && !state.challengeDecided || index === 2 && (!state.confirmedInquiry || inquiryChanged)}
+              disabled={index === 1 && (!state.challengeDecided || !state.confirmedInterpretation ||
+                state.educatorInterpretation.trim() !== state.confirmedInterpretation) ||
+                index === 2 && (!state.confirmedInquiry || inquiryChanged)}
               onClick={() => navigate((index + 1) as 1 | 2 | 3)}><span>{index + 1}</span>{name}</button>)}</nav>
           <div className="editor-content">
             <span className="status-label">Educator draft</span>
@@ -218,6 +223,8 @@ export function Workspace({ onLock }: { onLock: () => void }) {
             <textarea id="interpretation" maxLength={2000} rows={5} value={state.educatorInterpretation}
               onChange={(event) => edit('educatorInterpretation', event.target.value)} />
             <p className="field-note">Your interpretation stays yours, even when you accept an AI question.</p>
+            {state.step !== 1 && state.confirmedInterpretation &&
+              <div className="confirmed-inquiry"><span className="eyebrow">EDUCATOR-CONFIRMED INTERPRETATION</span><p>{state.confirmedInterpretation}</p></div>}
             {state.step !== 1 && <>
               <div className="field-heading"><label htmlFor="inquiry">Your PLC Question</label>
                 <span className="status-label">{state.confirmedInquiry && !inquiryChanged ? 'Educator confirmed' : 'Educator draft'}</span></div>
@@ -236,7 +243,9 @@ export function Workspace({ onLock }: { onLock: () => void }) {
               {busy && <button className="secondary" onClick={stop}>Cancel request</button>}
             </div>
             {state.step === 1 && <button className="secondary confirm-button" disabled={!state.educatorInterpretation.trim() || busy || !!state.pending}
-              onClick={() => dispatch({ type: 'continueWithoutChallenge' })}>Continue with my interpretation →</button>}
+              onClick={() => dispatch({ type: state.challengeDecided ? 'confirmInterpretation' : 'continueWithoutChallenge' })}>
+              {state.challengeDecided ? 'Confirm interpretation and continue →' : 'Continue with my interpretation →'}
+            </button>}
             {state.step === 2 && <button className="secondary confirm-button" disabled={!state.inquiryDraft.trim() || busy || !!state.pending}
               onClick={() => dispatch({ type: 'confirmInquiry' })}>Confirm inquiry →</button>}
             {state.step === 2 && state.decisions.at(-1)?.suggestion.action === 'challenge' && state.decisions.at(-1)?.choice === 'rejected' &&
@@ -286,8 +295,14 @@ export function Workspace({ onLock }: { onLock: () => void }) {
                 <p>{decision.appliedToDraft ? 'Copied to an editable draft. Separate confirmation required.'
                   : 'Not copied. Educator work preserved; not used as later request context.'}</p>
                 <p className="history-content">{decision.suggestion.action === 'suggest_activity'
-                  ? formatActivity(decision.suggestion.activity) : decision.suggestion.suggestedInquiry}</p>
-                {decision.suggestion.action === 'challenge' && <p>{decision.suggestion.alternativeHypothesis}<br />{decision.suggestion.probingQuestion}</p>}
+                  ? formatActivity(decision.suggestion.activity)
+                  : decision.suggestion.action === 'challenge'
+                    ? decision.suggestion.revisedInterpretation : decision.suggestion.suggestedInquiry}</p>
+                {decision.suggestion.action === 'challenge' && <p>
+                  Documented evidence: {decision.suggestion.evidenceConsideration}<br />
+                  Possible explanation: {decision.suggestion.alternativeHypothesis}<br />
+                  {decision.suggestion.probingQuestion}
+                </p>}
                 <p>{decision.suggestion.rationale}</p><p>Limits: {decision.suggestion.limitations}</p>
                 <Sources ids={decision.suggestion.sourceIds} />
               </details>)}

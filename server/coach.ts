@@ -1,5 +1,5 @@
-import OpenAI from 'openai'
-import { zodTextFormat } from 'openai/helpers/zod'
+import { GoogleGenAI, ApiError } from '@google/genai'
+import { z } from 'zod'
 import { evidence, learningGoal } from '../shared/evidence.ts'
 import { activitySchema, challengeSchema, refineSchema, suggestionSchema } from '../shared/schemas.ts'
 import type { CoachRequest } from '../shared/schemas.ts'
@@ -16,11 +16,24 @@ The assessment's correct-product and conceptual-explanation metrics use separate
 Descriptive data do not establish causation. State uncertainty and causal limits explicitly.
 Mathematical safety: 0.3 × 0.4 = 0.12, three tenths of four tenths, with 12 overlapping hundredths on a 10 × 10 area model. Never confuse twelve hundredths with twelve tenths.
 Action-specific tasks:
-For challenge, return a source-linked alternative hypothesis, a probing question, a rationale explaining why to investigate, and suggestedInquiry as proposed PLC inquiry wording. Keep the alternative tentative rather than claiming a cause.
-For refine_inquiry, return exactly one focused question about mathematical reasoning in suggestedInquiry. Preserve the educator's inquiry intent without prescribing an intervention or making causal claims.
-For suggest_activity, return exactly one teacher rehearsal aligned to the learning goal, not a whole meeting plan. Use only confirmedInquiry as the educator context, together with the provided sources and learning goal; do not assume earlier drafts, interpretations, or team decisions. Include facilitation guidance and a simple implementation check. Rehearsal segments must total exactly 15 minutes. Do not present a finalized team strategy.`;
+For challenge, distinguish documented evidence from speculation. Explain which supplied evidence supports or complicates the educator's interpretation and cite its source ID. Offer one meaningful, explicitly tentative counterhypothesis—not a diagnosis—plus one specific instructional question and a revised interpretation draft the educator may edit. Do not write a PLC inquiry question in this action.
+For refine_inquiry, use only the educator-confirmed interpretation and current educator-authored inquiry draft as context. Return exactly one focused question about mathematical reasoning in suggestedInquiry. Never use unaccepted suggestions or prior request history. Preserve the educator's inquiry intent without prescribing an intervention or making causal claims.
+For suggest_activity, return exactly one realistic 15-minute teacher rehearsal aligned to the learning goal, not a whole meeting plan. Use only confirmedInquiry as the educator context, together with the provided sources and learning goal; do not assume earlier drafts, interpretations, or team decisions. Include an objective, a concrete activity using decimal multiplication and place-value models, exactly two mathematical discussion prompts, one anticipated student misconception, what teachers should practice, and what student evidence could be examined afterward. Rehearsal segments must total exactly 15 minutes. Do not present a finalized team strategy.`;
 
 const INVALID_RESPONSE = 'The coach returned an invalid response. Your work is unchanged; please retry.'
+const MODEL_UNAVAILABLE = 'The coach provider could not produce a valid response. Your work is unchanged; please retry. If this continues, ask the project owner to check the provider configuration in Vercel project environment settings.'
+
+function providerSchema(schema: typeof challengeSchema | typeof refineSchema | typeof activitySchema) {
+  const jsonSchema = z.toJSONSchema(schema, { target: 'draft-7' })
+  const removeUnsupportedLengths = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(removeUnsupportedLengths)
+    if (!value || typeof value !== 'object') return value
+    return Object.fromEntries(Object.entries(value)
+      .filter(([key]) => key !== '$schema' && key !== 'minLength' && key !== 'maxLength')
+      .map(([key, child]) => [key, removeUnsupportedLengths(child)]))
+  }
+  return removeUnsupportedLengths(jsonSchema)
+}
 
 export function reconstructSources(sourceIds: string[]) {
   if (new Set(sourceIds).size !== sourceIds.length) throw new HttpError(400, 'Source IDs must be unique.')
@@ -33,36 +46,50 @@ export function reconstructSources(sourceIds: string[]) {
 
 export async function generateSuggestion(request: CoachRequest) {
   const sources = reconstructSources(request.sourceIds)
-  const apiKey = process.env.OPENAI_API_KEY
+  const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey?.trim()) {
-    throw new HttpError(503, 'The coach provider is not configured. Ask the project owner to set OPENAI_API_KEY in Vercel project environment settings and redeploy. Your work is unchanged.')
+    throw new HttpError(503, 'The coach provider is not configured. Ask the project owner to set GEMINI_API_KEY in Vercel project environment settings and redeploy. Your work is unchanged.')
   }
-  const client = new OpenAI({ apiKey, timeout: 25_000, maxRetries: 0 })
+  const client = new GoogleGenAI({
+    apiKey,
+    httpOptions: { timeout: 25_000, retryOptions: { attempts: 1 } },
+  })
   const schema = request.action === 'challenge' ? challengeSchema :
     request.action === 'refine_inquiry' ? refineSchema : activitySchema
   const humanInput = request.action === 'challenge' ? { educatorInterpretation: request.educatorInterpretation } :
-    request.action === 'refine_inquiry' ? { inquiryDraft: request.inquiryDraft } :
+    request.action === 'refine_inquiry' ? {
+      confirmedInterpretation: request.confirmedInterpretation, inquiryDraft: request.inquiryDraft,
+    } :
       { confirmedInquiry: request.confirmedInquiry }
-  let output: unknown
+  let text: string | undefined
   try {
-    const response = await client.responses.parse({
-      model: process.env.OPENAI_MODEL?.trim() || 'gpt-4.1-mini',
-      store: false,
-      max_output_tokens: 2200,
-      input: [
-        { role: 'system', content: SYSTEM_INSTRUCTIONS },
-        { role: 'user', content: JSON.stringify({ action: request.action, ...humanInput, learningGoal, sources }) },
-      ],
-      text: { format: zodTextFormat(schema, `coach_${request.action}`) },
+    const response = await client.models.generateContent({
+      model: process.env.GEMINI_MODEL?.trim() || 'gemini-3.8-flash',
+      contents: JSON.stringify({ action: request.action, ...humanInput, learningGoal, sources }),
+      config: {
+        systemInstruction: SYSTEM_INSTRUCTIONS,
+        responseMimeType: 'application/json',
+        responseJsonSchema: providerSchema(schema),
+        maxOutputTokens: 2200,
+      },
     })
-    if (response.status !== 'completed') throw new HttpError(502, INVALID_RESPONSE)
-    output = response.output_parsed
+    if (response.candidates?.[0]?.finishReason !== 'STOP') throw new HttpError(502, INVALID_RESPONSE)
+    text = response.text
   } catch (error) {
     if (error instanceof HttpError) throw error
-    if (error instanceof OpenAI.APIConnectionTimeoutError) throw new HttpError(504, 'The coach provider timed out. Your work is unchanged; please retry.')
-    if (error instanceof OpenAI.APIError && error.status === 429) throw new HttpError(429, 'The coach provider is at capacity. Your work is unchanged; please retry later.')
-    if (error instanceof OpenAI.APIConnectionError) throw new HttpError(502, 'The coach provider could not be reached. Your work is unchanged; please retry.')
-    throw new HttpError(502, 'The coach provider could not produce a valid response. Your work is unchanged; please retry. If this continues, ask the project owner to check the provider configuration in Vercel project environment settings.')
+    if (error instanceof ApiError && error.status === 429) throw new HttpError(429, 'The coach provider is at capacity. Your work is unchanged; please retry later.')
+    if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
+      throw new HttpError(504, 'The coach provider timed out. Your work is unchanged; please retry.')
+    }
+    if (error instanceof ApiError) throw new HttpError(502, MODEL_UNAVAILABLE)
+    throw new HttpError(502, 'The coach provider could not be reached. Your work is unchanged; please retry.')
+  }
+  let output: unknown
+  try {
+    if (!text) throw new Error('Empty structured response')
+    output = JSON.parse(text)
+  } catch {
+    throw new HttpError(502, INVALID_RESPONSE)
   }
   const parsed = suggestionSchema.safeParse(output)
   if (!parsed.success || parsed.data.action !== request.action ||

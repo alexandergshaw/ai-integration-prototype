@@ -20,7 +20,7 @@ The 68/96 and 29/96 figures are separate hypothetical rubric metrics, not a know
 
 ## Trust, security, and repeatability
 
-Three stateless Responses API calls use fixed boundaries, distinct structured schemas, server-owned fixtures, validated citations, and token/time limits. A signed demo-code session protects paid calls. Platform firewall and provider controls must supply distributed abuse/spend protection; process-memory counters would be misleading on serverless infrastructure.
+Three stateless Gemini `generateContent` calls use fixed boundaries, distinct structured schemas, server-owned fixtures, validated citations, and token/time limits. A signed demo-code session protects paid calls. Platform firewall and provider controls must supply distributed abuse/spend protection; process-memory counters would be misleading on serverless infrastructure.
 
 No model output is trusted as a confirmed decision. Schemas constrain format, time, citations, and the mathematical representation, but cannot prove all generated prose is pedagogically correct. Educators must inspect uncertainty and sources.
 

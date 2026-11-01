@@ -7,9 +7,10 @@ const common = {
 }
 export const challenge: Suggestion = {
   action: 'challenge',
+  evidenceConsideration: 'The separate scoring metrics do not show whether correct products and conceptual explanations came from the same students (assessment-2026-10-28).',
   alternativeHypothesis: 'Students may understand the product visually but need support expressing that reasoning.',
   probingQuestion: 'What does a student explanation of the overlapping hundredths reveal?',
-  suggestedInquiry: 'How do students connect overlapping tenths to twelve hundredths?',
+  revisedInterpretation: 'The current measures show a gap between correct products and adequate explanations, but do not establish which students are represented in both groups.',
   ...common,
 }
 export const refinement: Suggestion = {
@@ -28,10 +29,13 @@ export const rehearsal: Suggestion = {
       { minutes: 5, instruction: 'Compare conceptual and procedural explanations and rehearse a probing question.' },
     ],
     representation: '0.3 × 0.4 = 0.12; three tenths of four tenths; 12 overlapping hundredths on a 10 × 10 area model.',
-    facilitatorQuestion: 'Why is each overlapping cell a hundredth of the whole?',
+    discussionPrompts: [
+      'Why is each overlapping cell one hundredth of the whole?',
+      'How does the model show that three tenths of four tenths is 0.12?',
+    ],
     anticipatedMisconception: 'Treating twelve cells as twelve tenths.',
-    teacherResponse: 'Ask students to identify the whole and count its hundred equal cells.',
-    implementationCheck: 'Ask a partner to explain the unit of each overlapping cell without a decimal rule.',
+    teachersPractice: 'Name the whole, connect each dimension to tenths, and press for an explanation of the overlap.',
+    studentEvidence: 'A labeled area model and an explanation naming the unit of each overlapping cell.',
   },
   ...common,
 }
