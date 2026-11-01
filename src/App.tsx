@@ -84,6 +84,7 @@ function SuggestionContent({ suggestion }: { suggestion: Suggestion }) {
 
 function Gate({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [code, setCode] = useState('')
+  const [codeVisible, setCodeVisible] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   return <main className="gate">
@@ -109,8 +110,14 @@ function Gate({ onAuthenticated }: { onAuthenticated: () => void }) {
         } finally { setBusy(false) }
       }}>
         <label htmlFor="demo-code">Demo access code</label>
-        <input id="demo-code" type="password" autoComplete="current-password" maxLength={200} value={code}
-          onChange={(event) => setCode(event.target.value)} required />
+        <div className="password-field">
+          <input id="demo-code" type={codeVisible ? 'text' : 'password'} autoComplete="current-password" maxLength={200} value={code}
+            onChange={(event) => setCode(event.target.value)} required />
+          <button className="password-visibility" type="button" aria-label={codeVisible ? 'Hide password' : 'Show password'}
+            aria-pressed={codeVisible} onClick={() => setCodeVisible((visible) => !visible)}>
+            {codeVisible ? 'Hide' : 'Show'}
+          </button>
+        </div>
         <button className="primary" disabled={busy || !code.trim()}>{busy ? 'Opening workspace…' : 'Open workspace →'}</button>
         {error && <p role="alert" className="error">{error}</p>}
       </form>
