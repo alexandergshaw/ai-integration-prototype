@@ -22,13 +22,17 @@ function EvidenceRail() {
     <summary>Evidence & lesson context <span>Read only</span></summary>
     <div className="rail-content">
       <div className="eyebrow">GRADE 5 · DECIMAL MULTIPLICATION</div>
-      <h2>Correct answers.<br />Deeper reasoning?</h2>
-      <p className="lesson-goal">{learningGoal}</p>
-      <div className="math-model" aria-label="10 by 10 area model: three columns of tenths overlap four rows of tenths in twelve hundredths">
-        {Array.from({ length: 100 }, (_, i) =>
-          <span key={i} className={i % 10 < 3 && i < 40 ? 'overlap' : i % 10 < 3 ? 'tenths-a' : i < 40 ? 'tenths-b' : ''} />)}
+      <h2>Why hundredths?</h2>
+      <div className="lesson-context">
+        <p className="lesson-goal" aria-label={learningGoal}>Explain why multiplying tenths gives hundredths:<br />0.3 × 0.4 = 0.12.</p>
+        <div>
+          <div className="math-model" aria-label="10 by 10 area model: three columns of tenths overlap four rows of tenths in twelve hundredths">
+            {Array.from({ length: 100 }, (_, i) =>
+              <span key={i} className={i % 10 < 3 && i < 40 ? 'overlap' : i % 10 < 3 ? 'tenths-a' : i < 40 ? 'tenths-b' : ''} />)}
+          </div>
+          <p className="model-caption">12 overlapping hundredths</p>
+        </div>
       </div>
-      <p className="model-caption">3 tenths × 4 tenths = 12 hundredths</p>
       <section id={`source-${evidence[0].id}`} tabIndex={-1} className="assessment-source">
         <h3>{evidence[0].title}</h3>
         <p className="source-meta">October 28, 2026<br />{evidence[0].scope} · Demo-visible</p>
@@ -43,10 +47,9 @@ function EvidenceRail() {
       {evidence.slice(1).map((source) => <section key={source.id} id={`source-${source.id}`} className="student-work" tabIndex={-1}>
         <h4>{source.title}</h4>
         <blockquote>“{source.text}”</blockquote>
-        <p className="source-meta">{source.date} · {source.scope} · Demo-visible</p>
-        <code>{source.id}</code>
+        <p className="source-meta"><code>{source.id}</code> · {source.date} · 1 illustrative response · Demo-visible</p>
       </section>)}
-      <p className="rail-footnote">These examples illustrate reasoning; they do not establish its prevalence or cause. Procedural wording alone does not establish conceptual understanding.</p>
+      <p className="rail-footnote">Illustrative work—not prevalence or causal evidence. Procedural wording alone does not establish conceptual understanding.</p>
     </div>
   </details>
 }
@@ -232,6 +235,8 @@ export function Workspace({ onLock }: { onLock: () => void }) {
               <p className="field-note">AI runs only when you ask. Accepting copies a suggestion into a draft.</p>
               {busy && <button className="secondary" onClick={stop}>Cancel request</button>}
             </div>
+            {state.step === 1 && <button className="secondary confirm-button" disabled={!state.educatorInterpretation.trim() || busy || !!state.pending}
+              onClick={() => dispatch({ type: 'continueWithoutChallenge' })}>Continue with my interpretation →</button>}
             {state.step === 2 && <button className="secondary confirm-button" disabled={!state.inquiryDraft.trim() || busy || !!state.pending}
               onClick={() => dispatch({ type: 'confirmInquiry' })}>Confirm inquiry →</button>}
             {state.step === 2 && state.decisions.at(-1)?.suggestion.action === 'challenge' && state.decisions.at(-1)?.choice === 'rejected' &&
@@ -269,7 +274,7 @@ export function Workspace({ onLock }: { onLock: () => void }) {
               </> : <div className="empty-state"><span className="thinking-icon" aria-hidden="true">✧</span>
                 <h3>{state.decisions.length ? 'Your decision leads.' : 'A second perspective, when you want one.'}</h3>
                 <p>{state.decisions.length ? 'Continue with your wording, or request a fresh suggestion. Nothing is confirmed automatically.'
-                  : 'Ask for a challenge to your interpretation. Inspect its evidence and limits, then decide what to keep.'}</p></div>}
+                  : 'Request a suggestion for this step. Inspect its evidence and limits, then decide what to keep.'}</p></div>}
             {state.error && <p className="error" role="alert">{state.error}</p>}
           </section>
           <section className="decision-trail" aria-label="Decision trail" aria-live="polite">

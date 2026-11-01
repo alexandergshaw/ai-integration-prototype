@@ -61,6 +61,13 @@ describe('All six educator decisions', () => {
 })
 
 describe('Confirmation and stale-response boundaries', () => {
+  it('permits educator-only progress without inventing an AI decision', () => {
+    const next = reducer(initialState, { type: 'continueWithoutChallenge' })
+    expect(next.step).toBe(2)
+    expect(next.inquiryDraft).toBe(initialState.inquiryDraft)
+    expect(next.decisions).toEqual([])
+    expect(next.confirmedInquiry).toBe('')
+  })
   it('requires confirmed inquiry for activity requests', () => {
     expect(reducer(initialState, { type: 'start', id: requestId, action: 'suggest_activity' })).toEqual(initialState)
   })

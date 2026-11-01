@@ -16,30 +16,32 @@ h1 { font-size: 30px; letter-spacing: -1.1px; margin: 0 0 8px; line-height: 1.2;
 .evidence-rail { background: #f8fafb; }
 .evidence-rail > summary { padding: 17px 18px; background: #edf3f4; font-size: 12px; font-weight: 700; cursor: pointer; }
 .evidence-rail > summary span { font-weight: 400; margin-left: 8px; font-size: 10px; color: var(--muted); }
-.rail-content { padding: 20px 18px; }
-.rail-content h2 { font-size: 20px; line-height: 1.25; margin: 10px 0; letter-spacing: -.5px; }
-.lesson-goal { font-size: 12px; line-height: 1.65; color: var(--muted); }
-.math-model { width: 110px; display: grid; grid-template-columns: repeat(10, 1fr); gap: 1px; margin: 16px auto 7px; background: #c5d8dc; border: 1px solid #c5d8dc; }
+.rail-content { padding: 16px 18px; }
+.rail-content h2 { font-size: 18px; line-height: 1.25; margin: 8px 0; letter-spacing: -.5px; }
+.lesson-context { display: grid; grid-template-columns: 1fr 76px; gap: 12px; align-items: center; margin: 10px 0 15px; }
+.lesson-goal { font-size: 11px; line-height: 1.6; color: var(--muted); margin: 0; }
+.math-model { width: 76px; display: grid; grid-template-columns: repeat(10, 1fr); gap: 1px; margin: 0 auto 6px; background: #c5d8dc; border: 1px solid #c5d8dc; }
 .math-model span { aspect-ratio: 1; background: #fff; }
 .math-model .overlap { background: var(--teal); }
 .math-model .tenths-a { background: #b5dfd7; }
 .math-model .tenths-b { background: #d1e2f2; }
-.model-caption { text-align: center; font-size: 10px; color: var(--muted); margin: 0 0 20px; }
-.assessment-source { border-top: 1px solid var(--line); padding-top: 16px; }
+.model-caption { text-align: center; font-size: 9px; line-height: 1.4; color: var(--muted); margin: 0; }
+.assessment-source { border-top: 1px solid var(--line); padding-top: 12px; }
 .rail-content h3 { font-size: 12px; margin: 0 0 6px; }
 .source-meta { font-size: 9px; line-height: 1.6; color: var(--muted); margin: 5px 0; }
-.metrics { display: grid; grid-template-columns: 1fr 1fr; margin: 15px 0; gap: 12px; }
+.metrics { display: grid; grid-template-columns: 1fr 1fr; margin: 8px 0; gap: 12px; }
 .metrics > div { display: flex; flex-direction: column; gap: 3px; }
-.metrics strong { font-size: 33px; letter-spacing: -1px; }
+.metrics strong { font-size: 30px; letter-spacing: -1px; }
 .metrics strong > span { font-size: 17px; }
 .metrics b { font-size: 12px; }
 .metrics div > span { font-size: 10px; color: var(--muted); }
 .rubric-note, .rail-footnote { font-size: 10px; line-height: 1.6; color: var(--muted); }
 code { display: block; font-size: 9px; color: #536672; overflow-wrap: anywhere; }
-.work-heading { margin-top: 20px !important; }
-.student-work { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.work-heading { margin-top: 16px !important; }
+.student-work { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.student-work code { display: inline; font-weight: 700; }
 .student-work h4 { margin: 0 0 6px; font-size: 11px; }
-blockquote { font-size: 12px; line-height: 1.6; margin: 0; }
+blockquote { font-size: 11px; line-height: 1.6; margin: 0; }
 .stepper { display: flex; border-bottom: 1px solid var(--line); padding: 15px 16px; gap: 8px; background: #fbfcfd; }
 .stepper button { border: 0; background: transparent; display: flex; gap: 6px; align-items: center; flex: 1; padding: 6px 0; font-size: 11px; color: var(--muted); }
 .stepper button > span { width: 22px; height: 22px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; font-size: 10px; }
@@ -117,7 +119,8 @@ footer { text-align: center; font-size: 10px; line-height: 1.6; color: var(--mut
   .evidence-rail { grid-column: 1 / -1; grid-row: 2; }
   .rail-content { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 25px; }
   .rail-content .math-model, .rail-content .model-caption { display: none; }
-  .rail-content h2, .rail-content .eyebrow, .rail-content .lesson-goal, .work-heading, .rail-footnote { grid-column: 1 / -1; }
+  .rail-content h2, .rail-content .eyebrow, .lesson-context, .work-heading, .rail-footnote { grid-column: 1 / -1; }
+  .lesson-context { display: block; }
 }
 @media (max-width: 640px) {
   .topbar { padding: 15px; }

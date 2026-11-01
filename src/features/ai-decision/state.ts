@@ -54,6 +54,7 @@ type Event =
   | { type: 'cancel' }
   | { type: 'decide'; choice: 'accepted' | 'rejected'; at: string }
   | { type: 'confirmInquiry' }
+  | { type: 'continueWithoutChallenge' }
   | { type: 'confirmActivity' }
   | { type: 'reviewActivity' }
   | { type: 'reset' }
@@ -93,6 +94,9 @@ export function reducer(state: State, event: Event): State {
     case 'error':
       return state.request?.id === event.requestId ? { ...state, request: null, error: event.message } : state
     case 'cancel': return { ...state, request: null, error: 'Request cancelled. Your work is unchanged.' }
+    case 'continueWithoutChallenge':
+      if (state.request || state.pending || !state.educatorInterpretation.trim()) return state
+      return { ...state, challengeDecided: true, step: 2, error: '' }
     case 'decide': {
       if (!state.pending) return state
       const { id, suggestion } = state.pending

@@ -104,6 +104,8 @@ describe('Workspace interaction and provider-idle boundaries', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Challenge my interpretation' }))
     expect((await screen.findByRole('alert')).textContent).toContain('Unable to connect')
     expect(screen.queryByRole('button', { name: 'Accept suggestion' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with my interpretation →' }))
+    expect((screen.getByLabelText('Your PLC Question') as HTMLTextAreaElement).value).toBe(initialState.inquiryDraft)
   })
   it('does not render fabricated model sources as valid citations', async () => {
     modelResponse({ ...challenge, sourceIds: ['invented-source'] })
