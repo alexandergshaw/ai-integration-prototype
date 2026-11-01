@@ -46,8 +46,8 @@ export function reconstructSources(sourceIds: string[]) {
 
 export async function generateSuggestion(request: CoachRequest) {
   const sources = reconstructSources(request.sourceIds)
-  const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey?.trim()) {
+  const apiKey = process.env.GEMINI_API_KEY?.trim()
+  if (!apiKey) {
     throw new HttpError(503, 'The coach provider is not configured. Ask the project owner to set GEMINI_API_KEY in Vercel project environment settings and redeploy. Your work is unchanged.')
   }
   const client = new GoogleGenAI({
@@ -77,11 +77,26 @@ export async function generateSuggestion(request: CoachRequest) {
     text = response.text
   } catch (error) {
     if (error instanceof HttpError) throw error
-    if (error instanceof ApiError && error.status === 429) throw new HttpError(429, 'The coach provider is at capacity. Your work is unchanged; please retry later.')
+    if (error instanceof ApiError) {
+      console.error('Gemini coach request failed', { status: error.status, action: request.action })
+      if (error.status === 429) throw new HttpError(429, 'The coach provider is at capacity. Your work is unchanged; please retry later.')
+      if (error.status === 401 || error.status === 403) {
+        throw new HttpError(502, 'Gemini rejected authentication or denied access. Ask the project owner to check GEMINI_API_KEY and its Google AI Studio project permissions in Vercel project environment settings, then redeploy. Your work is unchanged.')
+      }
+      if (error.status === 404) {
+        throw new HttpError(502, 'The configured Gemini model was not found or is unavailable to this API key. Ask the project owner to check GEMINI_MODEL and model access for the Google AI Studio project in Vercel project environment settings, then redeploy. Your work is unchanged.')
+      }
+      if (error.status === 400) {
+        throw new HttpError(502, 'Gemini rejected the request (HTTP 400). Ask the project owner to check GEMINI_API_KEY, GEMINI_MODEL, and the structured-output request configuration. Your work is unchanged.')
+      }
+      if (error.status >= 500 && error.status <= 599) {
+        throw new HttpError(502, 'Gemini is temporarily unable to process the request. Your work is unchanged; please retry later.')
+      }
+      throw new HttpError(502, MODEL_UNAVAILABLE)
+    }
     if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
       throw new HttpError(504, 'The coach provider timed out. Your work is unchanged; please retry.')
     }
-    if (error instanceof ApiError) throw new HttpError(502, MODEL_UNAVAILABLE)
     throw new HttpError(502, 'The coach provider could not be reached. Your work is unchanged; please retry.')
   }
   let output: unknown
