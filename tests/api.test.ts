@@ -238,6 +238,7 @@ describe('coach API', () => {
     })
     expect(args.config.responseJsonSchema).not.toHaveProperty('$schema')
     expect(args.config.responseJsonSchema.properties.evidenceConsideration).not.toHaveProperty('maxLength')
+    expect(args.config.responseJsonSchema.properties.action).toEqual({ type: 'string', enum: ['challenge'] })
     expect(args.config.systemInstruction).toContain('overlap is unknown')
     expect(args.config.systemInstruction).toContain('explicitly tentative')
     expect(args.config.systemInstruction).toContain('exactly two mathematical discussion prompts')
@@ -260,6 +261,25 @@ describe('coach API', () => {
       generateContentMock.mockResolvedValueOnce(providerResponse(item.suggestion))
       expect((await call(coach, { cookie, body: item.body })).status).toBe(200)
       const payload = JSON.parse(generateContentMock.mock.lastCall![0].contents)
+      const schema = generateContentMock.mock.lastCall![0].config.responseJsonSchema
+      expect(schema.properties.action).toEqual({ type: 'string', enum: [item.body.action] })
+      const checkProviderSchema = (value: unknown) => {
+        if (!value || typeof value !== 'object') return
+        for (const [key, child] of Object.entries(value)) {
+          expect(['const', '$schema', 'minLength', 'maxLength']).not.toContain(key)
+          checkProviderSchema(child)
+        }
+      }
+      checkProviderSchema(schema)
+      if (item.body.action === 'suggest_activity') {
+        expect(schema.properties.activity.properties.representation).toEqual({
+          type: 'string', enum: [activity.activity.representation],
+        })
+        expect(schema.properties.activity.properties.discussionPrompts).toMatchObject({ minItems: 2, maxItems: 2 })
+        expect(schema.properties.activity.properties.steps.items.properties.minutes).toEqual({
+          type: 'integer', minimum: 1, maximum: 15,
+        })
+      }
       expect(payload[item.field]).toBe((item.body as Record<string, unknown>)[item.field])
       expect(Object.keys(payload).sort()).toEqual([
         'action', ...(item.body.action === 'refine_inquiry' ? ['inquiryDraft'] : []),
