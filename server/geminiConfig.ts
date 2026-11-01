@@ -16,7 +16,16 @@ export function getGeminiApiKey(env: NodeJS.ProcessEnv = process.env) {
 }
 
 export function getGeminiModel(env: NodeJS.ProcessEnv = process.env) {
-  return env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL
+  const model = env.GEMINI_MODEL?.trim()
+  if (!model) return DEFAULT_GEMINI_MODEL
+  // Check syntax only; provider model availability and access remain Google's decision.
+  if (model === 'GEMINI_MODEL' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9._-]*)*$/.test(model)) {
+    throw new HttpError(
+      503,
+      'The Gemini model setting is invalid. Set GEMINI_MODEL to a supported model ID, such as gemini-2.5-flash, or remove the override to use the application default. Redeploy after changing Vercel environment variables. Your work is unchanged.',
+    )
+  }
+  return model
 }
 
 export function getGeminiGenerationOptions(model: string) {

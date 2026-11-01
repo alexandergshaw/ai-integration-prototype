@@ -102,14 +102,14 @@ function safeUsage(response: ProviderResponse) {
 
 function logFailure(
   request: CoachRequest,
-  model: string,
+  model: string | undefined,
   startedAt: number,
   fields: Record<string, unknown>,
 ) {
   console.error('Gemini coach failure', {
     requestId: request.requestId,
     action: request.action,
-    model,
+    ...(model === undefined ? {} : { model }),
     elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
     ...fields,
   })
@@ -154,13 +154,17 @@ export function reconstructSources(sourceIds: string[]) {
 export async function generateSuggestion(request: CoachRequest) {
   const startedAt = performance.now()
   const sources = reconstructSources(request.sourceIds)
-  const model = getGeminiModel()
+  let model: string | undefined
   let apiKey: string
   try {
+    model = getGeminiModel()
     apiKey = getGeminiApiKey()
   } catch (error) {
     if (error instanceof HttpError && error.status === 503) {
-      logFailure(request, model, startedAt, { stage: 'configuration', category: 'missing_api_key' })
+      logFailure(request, model, startedAt, {
+        stage: 'configuration',
+        category: model === undefined ? 'invalid_model_configuration' : 'missing_api_key',
+      })
     }
     throw error
   }

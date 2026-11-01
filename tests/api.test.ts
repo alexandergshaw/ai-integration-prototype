@@ -350,6 +350,52 @@ describe('coach API', () => {
     }
     expect(generateContentMock).toHaveBeenCalledTimes(1)
   })
+  it.each([
+    'GEMINI_MODEL', '${GEMINI_MODEL}', '$GEMINI_MODEL',
+    'GEMINI_MODEL=gemini-2.5-flash', '"gemini-2.5-flash"', "'gemini-2.5-flash'",
+    'gemini model', 'GEMINI_MODEL=pasted-private-credential',
+  ])('returns a safe configuration error before constructing or calling Gemini', async (value) => {
+    const cookie = await login()
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubEnv('GEMINI_MODEL', value)
+    const result = await call(coach, { cookie, body: request() })
+    expect(result.status).toBe(503)
+    // Keep the existing manual-demo eligibility for generation configuration failures.
+    expect(result.data).toEqual({
+      error: 'The Gemini model setting is invalid. Set GEMINI_MODEL to a supported model ID, such as gemini-2.5-flash, or remove the override to use the application default. Redeploy after changing Vercel environment variables. Your work is unchanged.',
+      category: 'provider_failure',
+    })
+    expect(options).toHaveLength(0)
+    expect(generateContentMock).not.toHaveBeenCalled()
+    expect(log).toHaveBeenCalledExactlyOnceWith('Gemini coach failure', {
+      requestId, action: 'challenge', elapsedMs: expect.any(Number),
+      stage: 'configuration', category: 'invalid_model_configuration',
+    })
+    const diagnostics = JSON.stringify(log.mock.calls)
+    for (const privateValue of [value, 'test-key', code, secret, request().educatorInterpretation]) {
+      expect(diagnostics).not.toContain(privateValue)
+    }
+    expect(JSON.stringify(result.data)).not.toContain('pasted-private-credential')
+  })
+  it('uses the same trimmed model in the provider request and safe provider diagnostics', async () => {
+    const cookie = await login()
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubEnv('GEMINI_MODEL', ' \tgemini-future-model-preview \n')
+    generateContentMock.mockRejectedValueOnce(new ApiError({ status: 404, message: 'private-provider-detail' }))
+    const result = await call(coach, { cookie, body: request() })
+    expect(result.status).toBe(502)
+    expect(result.data).toEqual({
+      error: expect.stringContaining('not found or is unavailable to this API key'),
+      category: 'provider_failure',
+    })
+    expect(generateContentMock).toHaveBeenCalledTimes(1)
+    expect(generateContentMock.mock.lastCall![0].model).toBe('gemini-future-model-preview')
+    expect(log).toHaveBeenCalledExactlyOnceWith('Gemini coach failure', {
+      requestId, action: 'challenge', model: 'gemini-future-model-preview',
+      elapsedMs: expect.any(Number), stage: 'provider', category: 'http_rejection', providerStatus: 404,
+    })
+    expect(JSON.stringify(log.mock.calls)).not.toContain('private-provider-detail')
+  })
   it('forbids source tampering, historical and observation IDs, duplicates and supplied source objects', async () => {
     const cookie = await login()
     for (const body of [

@@ -35,10 +35,41 @@ describe('server-only Gemini configuration', () => {
     }
   })
 
-  it('respects explicit model configuration and defaults to the documented model', () => {
-    expect(getGeminiModel({ GEMINI_MODEL: '  gemini-custom-model  ' })).toBe('gemini-custom-model')
-    expect(getGeminiModel({ GEMINI_MODEL: '  ' })).toBe(DEFAULT_GEMINI_MODEL)
+  it.each([{}, { GEMINI_MODEL: '' }, { GEMINI_MODEL: ' \t\n ' }])(
+    'uses the default for an absent or blank model override',
+    (env) => {
+      expect(getGeminiModel(env)).toBe(DEFAULT_GEMINI_MODEL)
+    },
+  )
+
+  it('keeps the documented default model', () => {
     expect(DEFAULT_GEMINI_MODEL).toBe('gemini-2.5-flash')
+  })
+
+  it.each([
+    ['gemini-2.5-flash', 'gemini-2.5-flash'],
+    [' \tgemini-2.5-flash \n', 'gemini-2.5-flash'],
+    ['gemini-future-model-preview', 'gemini-future-model-preview'],
+    ['models/gemini-custom-model', 'models/gemini-custom-model'],
+    ['projects/demo/locations/global/publishers/google/models/gemini-custom', 'projects/demo/locations/global/publishers/google/models/gemini-custom'],
+  ])('supports a syntactically valid override without a version allowlist', (value, expected) => {
+    expect(getGeminiModel({ GEMINI_MODEL: value })).toBe(expected)
+  })
+
+  it.each([
+    'GEMINI_MODEL', ' GEMINI_MODEL ',
+    '${GEMINI_MODEL}', '$GEMINI_MODEL',
+    'GEMINI_MODEL=gemini-2.5-flash',
+    '"gemini-2.5-flash"', "'gemini-2.5-flash'", '`gemini-2.5-flash`',
+    'gemini 2.5 flash', 'gemini-2.5-\nflash', 'gemini-\0flash',
+    'https://example.com/models/gemini-2.5-flash',
+    'models//gemini-2.5-flash', 'models/', '../gemini-2.5-flash',
+    'gemini-2.5-flash?key=private-value',
+  ])('rejects malformed configuration without echoing it', (value) => {
+    expect(() => getGeminiModel({ GEMINI_MODEL: value })).toThrow(expect.objectContaining({
+      status: 503,
+      message: 'The Gemini model setting is invalid. Set GEMINI_MODEL to a supported model ID, such as gemini-2.5-flash, or remove the override to use the application default. Redeploy after changing Vercel environment variables. Your work is unchanged.',
+    }))
   })
 
   it('applies thinking only to Gemini 2.5 Flash and shares the named output/timeout baselines', () => {
