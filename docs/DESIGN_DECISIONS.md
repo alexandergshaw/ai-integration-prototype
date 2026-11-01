@@ -6,6 +6,8 @@ A chatbot approach gets several things right: educator-authored language, quick 
 
 This vertical slice is enough for an interview: it demonstrates three real model integrations, human authorship, rejection, confirmation, and downstream invalidation without diluting those moments across an entire PLC planner.
 
+The interface is deliberately a minimal prototype: system typography, flat surfaces, thin dividers, and restrained navy/teal accents. Plain labels replace decorative AI icons and promotional copy. Evidence, educator drafts, unconfirmed AI suggestions, and decision history remain distinct; mobile evidence stays in a disclosure.
+
 ## Agency is an implementation invariant
 
 Accept copies a question or activity into a draft. It does not establish truth or confirm an educator decision. Reject is equally visible, preserves work, and never blocks progress. Confirmation is independent. Only action-specific educator text and server-authorized evidence enter later calls; suggestion history is for inspection, not provider context. If an educator explicitly copies or writes text, it is their current draft, not silently inferred acceptance.
