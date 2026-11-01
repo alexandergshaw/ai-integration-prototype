@@ -104,6 +104,10 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 11px; 
 .gate-card > p:not(.eyebrow) { font-size: 14px; color: var(--muted); line-height: 1.6; margin: 0; }
 .gate-card form { display: grid; gap: 12px; margin: 28px 0 20px; }
 .gate-card form label { margin: 0; }
+.password-field { position: relative; }
+.password-field input { padding-right: 72px; }
+.password-visibility { position: absolute; top: 50%; right: 12px; transform: translateY(-50%); border: 0; padding: 4px; background: transparent; color: #075d59; font-size: 12px; font-weight: 600; }
+.password-visibility:hover { text-decoration: underline; }
 .gate-card form .error { margin: 0; }
 .gate-card small { display: block; font-size: 11px; line-height: 1.6; color: var(--muted); }
 .gate[role="status"] { font-size: 14px; color: var(--muted); }

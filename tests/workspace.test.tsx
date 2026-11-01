@@ -24,11 +24,26 @@ describe('Workspace interaction and provider-idle boundaries', () => {
   it('loads signed-session gate without requesting AI', async () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ authenticated: false }) })
     render(<App />)
-    expect(await screen.findByLabelText('Demo access code')).toBeTruthy()
+    const code = await screen.findByLabelText('Demo access code') as HTMLInputElement
+    expect(code.type).toBe('password')
     expect(screen.getByRole('heading', { name: 'AI Coaching Workspace' })).toBeTruthy()
     expect(screen.getByText('Review evidence, draft an inquiry, and plan a rehearsal. AI suggestions are optional.')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0][0]).toBe('/api/session')
+  })
+  it('shows and hides the access code without submitting the form', async () => {
+    const user = userEvent.setup()
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ authenticated: false }) })
+    render(<App />)
+    const code = await screen.findByLabelText('Demo access code') as HTMLInputElement
+    await user.type(code, 'demo-code')
+    await user.click(screen.getByRole('button', { name: 'Show password' }))
+    expect(code.type).toBe('text')
+    expect(code.value).toBe('demo-code')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole('button', { name: 'Hide password' }))
+    expect(code.type).toBe('password')
+    expect(code.value).toBe('demo-code')
   })
   it('frames the workspace as a focused prototype with optional AI feedback', () => {
     render(<Workspace onLock={() => {}} />)
