@@ -1,0 +1,32 @@
+name: Gemini live diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Exact model used by the failing Vercel environment
+        required: true
+        type: string
+        default: gemini-2.5-flash
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Run six real requests with fictional data only
+        run: npm run diagnose:gemini
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_DIAGNOSTIC_API_KEY }}
+          GEMINI_MODEL: ${{ inputs.model }}

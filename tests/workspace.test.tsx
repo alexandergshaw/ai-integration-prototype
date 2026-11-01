@@ -146,6 +146,40 @@ describe('Workspace interaction and provider-idle boundaries', () => {
     expect(await screen.findByRole('alert')).toBeTruthy()
     expect(screen.queryByRole('link', { name: /invented-source/ })).toBeNull()
   })
+  it.each([
+    ['challenge', '1Challenge', 'Try another challenge'],
+    ['refine_inquiry', '2Refine', 'Suggest a stronger PLC question'],
+    ['suggest_activity', '3Rehearse', 'Suggest a PLC activity'],
+  ])('preserves all educator-authored artifacts after a failed %s request', async (_action, step, button) => {
+    const user = userEvent.setup()
+    render(<Workspace onLock={() => {}} />)
+    fireEvent.change(screen.getByLabelText('Your Interpretation'), { target: { value: 'My authored interpretation.' } })
+    await user.click(screen.getByRole('button', { name: 'Continue with my interpretation →' }))
+    fireEvent.change(screen.getByLabelText('Your PLC Question'), { target: { value: 'My authored inquiry?' } })
+    await user.click(screen.getByRole('button', { name: 'Confirm inquiry →' }))
+    fireEvent.change(screen.getByLabelText('Activity preview'), { target: { value: 'My authored rehearsal.' } })
+    await user.click(screen.getByRole('button', { name: step }))
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({ error: 'Provider unavailable. Your work is unchanged.' }) })
+    await user.click(screen.getByRole('button', { name: button }))
+    expect((await screen.findByRole('alert')).textContent).toContain('Your work is unchanged')
+    expect(screen.queryByRole('button', { name: 'Accept suggestion' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: '3Rehearse' }))
+    expect((screen.getByLabelText('Your Interpretation') as HTMLTextAreaElement).value).toBe('My authored interpretation.')
+    expect((screen.getByLabelText('Your PLC Question') as HTMLTextAreaElement).value).toBe('My authored inquiry?')
+    expect((screen.getByLabelText('Activity preview') as HTMLTextAreaElement).value).toBe('My authored rehearsal.')
+  })
+  it.each([
+    { id: 'not-a-uuid', requestId: crypto.randomUUID(), suggestion: challenge },
+    { id: crypto.randomUUID(), requestId: crypto.randomUUID(), suggestion: refinement },
+    { id: crypto.randomUUID(), requestId: crypto.randomUUID(), suggestion: { ...rehearsal, activity: {} } },
+  ])('rejects unverified client responses without overwriting the draft', async (body) => {
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => body })
+    render(<Workspace onLock={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Challenge my interpretation' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('could not be verified')
+    expect((screen.getByLabelText('Your Interpretation') as HTMLTextAreaElement).value).toBe(initialState.educatorInterpretation)
+    expect(screen.queryByRole('button', { name: 'Accept suggestion' })).toBeNull()
+  })
   it('cancellation keeps inputs and ignores late responses', async () => {
     let finish: ((value: unknown) => void) | undefined
     fetchMock.mockImplementation(() => new Promise((resolve) => { finish = resolve }))

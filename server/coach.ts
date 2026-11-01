@@ -1,4 +1,5 @@
 import { GoogleGenAI, ApiError } from '@google/genai'
+import type { GenerateContentParameters, GenerateContentResponse } from '@google/genai'
 import { z } from 'zod'
 import { evidence, learningGoal } from '../shared/evidence.ts'
 import { activitySchema, challengeSchema, refineSchema, suggestionSchema } from '../shared/schemas.ts'
@@ -27,19 +28,74 @@ const RESPONSE_FAILURES = {
   validation: 'Gemini returned a response that failed the coach validation checks.',
 }
 
-function invalidResponse(action: CoachRequest['action'], reason: keyof typeof RESPONSE_FAILURES) {
-  console.error('Gemini coach response rejected', { action, reason })
-  return new HttpError(502, `${RESPONSE_FAILURES[reason]} Your work is unchanged; please retry. If this continues, ask the project owner to review the model and structured-output configuration.`)
+type FailureCategory = 'configuration' | 'model_access' | 'provider_rejection' | 'rate_limit' |
+  'provider_unavailable' | 'timeout' | 'network' | 'incomplete_generation' | 'empty_response' | 'invalid_json' | 'validation' | 'internal'
+
+class CoachError extends HttpError {
+  readonly category: FailureCategory
+  readonly providerStatus?: number
+  readonly providerReason?: string
+  constructor(status: number, message: string, category: FailureCategory, providerStatus?: number, providerReason?: string) {
+    super(status, `${message} Your work is unchanged.`)
+    this.category = category
+    this.providerStatus = providerStatus
+    this.providerReason = providerReason
+  }
 }
 
-function providerSchema(schema: typeof challengeSchema | typeof refineSchema | typeof activitySchema) {
+export function configuredModel() {
+  return process.env.GEMINI_MODEL?.trim() || 'gemini-3.8-flash'
+}
+
+export const GEMINI_HTTP_OPTIONS = { timeout: 25_000, retryOptions: { attempts: 1 } }
+
+export function logCoachFailure(error: unknown, requestId: string, action?: CoachRequest['action']) {
+  const category = error instanceof CoachError ? error.category :
+    error instanceof HttpError ? (
+      error.status === 503 ? 'configuration' : error.status === 401 ? 'authentication' :
+        error.status === 403 ? 'authorization' : 'invalid_request'
+    ) : 'internal'
+  console.error('Gemini coach failure', {
+    action: action ?? null, category, providerStatus: error instanceof CoachError ? error.providerStatus ?? null : null,
+    providerReason: error instanceof CoachError ? error.providerReason ?? null : null,
+    model: configuredModel(), requestId,
+  })
+}
+
+function invalidResponse(reason: keyof typeof RESPONSE_FAILURES, providerReason?: string) {
+  const category = {
+    incomplete: 'incomplete_generation', empty: 'empty_response', json: 'invalid_json', validation: 'validation',
+  } as const
+  return new CoachError(502, `${RESPONSE_FAILURES[reason]} Please retry; if this continues, ask the project owner to review the response diagnostics.`,
+    category[reason], undefined, providerReason)
+}
+
+// Deliberately use only the subset needed here, verified against @google/genai 2.32.0.
+const SCHEMA_KEYWORDS = new Set([
+  'type', 'description', 'enum', 'properties', 'required', 'additionalProperties',
+  'items', 'minItems', 'maxItems', 'minimum', 'maximum',
+])
+
+export function providerSchema(schema: typeof challengeSchema | typeof refineSchema | typeof activitySchema) {
   const jsonSchema = z.toJSONSchema(schema, { target: 'draft-7' })
-  const toProviderSchema = (value: unknown): unknown => {
-    if (Array.isArray(value)) return value.map(toProviderSchema)
-    if (!value || typeof value !== 'object') return value
-    return Object.fromEntries(Object.entries(value)
-      .filter(([key]) => key !== '$schema' && key !== 'minLength' && key !== 'maxLength')
-      .map(([key, child]) => key === 'const' ? ['enum', [child]] : [key, toProviderSchema(child)]))
+  const toProviderSchema = (value: unknown): Record<string, unknown> => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid provider schema node.')
+    const result: Record<string, unknown> = {}
+    for (const [key, child] of Object.entries(value)) {
+      if (key === '$schema' || key === 'minLength' || key === 'maxLength') continue
+      if (key === 'const') {
+        if (typeof child !== 'string' && typeof child !== 'number') throw new Error('Unsupported provider literal.')
+        result.enum = [child]
+      } else if (!SCHEMA_KEYWORDS.has(key)) {
+        throw new Error(`Unsupported provider schema keyword: ${key}`)
+      } else if (key === 'properties') {
+        if (!child || typeof child !== 'object' || Array.isArray(child)) throw new Error('Invalid provider properties.')
+        result.properties = Object.fromEntries(Object.entries(child).map(([name, node]) => [name, toProviderSchema(node)]))
+      } else {
+        result[key] = key === 'items' ? toProviderSchema(child) : child
+      }
+    }
+    return result
   }
   return toProviderSchema(jsonSchema)
 }
@@ -53,16 +109,8 @@ export function reconstructSources(sourceIds: string[]) {
   })
 }
 
-export async function generateSuggestion(request: CoachRequest) {
+export function suggestionRequest(request: CoachRequest): GenerateContentParameters {
   const sources = reconstructSources(request.sourceIds)
-  const apiKey = process.env.GEMINI_API_KEY?.trim()
-  if (!apiKey) {
-    throw new HttpError(503, 'The coach provider is not configured. Ask the project owner to set GEMINI_API_KEY in Vercel project environment settings and redeploy. Your work is unchanged.')
-  }
-  const client = new GoogleGenAI({
-    apiKey,
-    httpOptions: { timeout: 25_000, retryOptions: { attempts: 1 } },
-  })
   const schema = request.action === 'challenge' ? challengeSchema :
     request.action === 'refine_inquiry' ? refineSchema : activitySchema
   const humanInput = request.action === 'challenge' ? { educatorInterpretation: request.educatorInterpretation } :
@@ -70,58 +118,130 @@ export async function generateSuggestion(request: CoachRequest) {
       confirmedInterpretation: request.confirmedInterpretation, inquiryDraft: request.inquiryDraft,
     } :
       { confirmedInquiry: request.confirmedInquiry }
-  let text: string | undefined
-  try {
-    const response = await client.models.generateContent({
-      model: process.env.GEMINI_MODEL?.trim() || 'gemini-3.8-flash',
-      contents: JSON.stringify({ action: request.action, ...humanInput, learningGoal, sources }),
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTIONS,
-        responseMimeType: 'application/json',
-        responseJsonSchema: providerSchema(schema),
-        maxOutputTokens: 2200,
-      },
-    })
-    if (response.candidates?.[0]?.finishReason !== 'STOP') throw invalidResponse(request.action, 'incomplete')
-    text = response.text
-  } catch (error) {
-    if (error instanceof HttpError) throw error
-    if (error instanceof ApiError) {
-      console.error('Gemini coach request failed', { status: error.status, action: request.action })
-      if (error.status === 429) throw new HttpError(429, 'The coach provider is at capacity. Your work is unchanged; please retry later.')
-      if (error.status === 401 || error.status === 403) {
-        throw new HttpError(502, 'Gemini rejected authentication or denied access. Ask the project owner to check GEMINI_API_KEY and its Google AI Studio project permissions in Vercel project environment settings, then redeploy. Your work is unchanged.')
-      }
-      if (error.status === 404) {
-        throw new HttpError(502, 'The configured Gemini model was not found or is unavailable to this API key. Ask the project owner to check GEMINI_MODEL and model access for the Google AI Studio project in Vercel project environment settings, then redeploy. Your work is unchanged.')
-      }
-      if (error.status === 400) {
-        throw new HttpError(502, 'Gemini rejected the request (HTTP 400). Ask the project owner to check GEMINI_API_KEY, GEMINI_MODEL, and the structured-output request configuration. Your work is unchanged.')
-      }
-      if (error.status >= 500 && error.status <= 599) {
-        throw new HttpError(502, 'Gemini is temporarily unable to process the request. Your work is unchanged; please retry later.')
-      }
-      throw new HttpError(502, `Gemini rejected the request (HTTP ${error.status}). Your work is unchanged; please retry. If this continues, ask the project owner to check the provider configuration in Vercel project environment settings.`)
-    }
-    if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
-      console.error('Gemini coach request failed', { action: request.action, reason: 'timeout' })
-      throw new HttpError(504, 'The coach provider timed out. Your work is unchanged; please retry.')
-    }
-    console.error('Gemini coach request failed', { action: request.action, reason: 'sdk_or_connection' })
-    throw new HttpError(502, 'The coach provider could not be reached. Your work is unchanged; please retry.')
+  return {
+    model: configuredModel(),
+    contents: JSON.stringify({ action: request.action, ...humanInput, learningGoal, sources }),
+    config: {
+      systemInstruction: SYSTEM_INSTRUCTIONS,
+      responseMimeType: 'application/json',
+      responseJsonSchema: providerSchema(schema),
+      maxOutputTokens: 2200,
+      automaticContinuation: false,
+    },
   }
-  if (!text) throw invalidResponse(request.action, 'empty')
+}
+
+const SAFE_REASONS = new Set([
+  'INVALID_ARGUMENT', 'UNAUTHENTICATED', 'PERMISSION_DENIED', 'NOT_FOUND', 'RESOURCE_EXHAUSTED',
+  'INTERNAL', 'UNAVAILABLE', 'DEADLINE_EXCEEDED', 'API_KEY_INVALID', 'API_KEY_EXPIRED',
+  'API_KEY_SERVICE_BLOCKED', 'API_KEY_HTTP_REFERRER_BLOCKED', 'API_KEY_IP_ADDRESS_BLOCKED',
+  'SERVICE_DISABLED', 'BILLING_DISABLED', 'CONSUMER_INVALID', 'RATE_LIMIT_EXCEEDED',
+])
+
+function providerReason(error: ApiError): string | undefined {
+  let body: unknown
+  try {
+    body = JSON.parse(error.message)
+  } catch {
+    return undefined
+  }
+  if (!body || typeof body !== 'object' || !('error' in body)) return undefined
+  const detail = body.error
+  if (!detail || typeof detail !== 'object') return undefined
+  if ('details' in detail && Array.isArray(detail.details)) {
+    for (const item of detail.details) {
+      if (item && typeof item === 'object' && 'reason' in item &&
+        typeof item.reason === 'string' && SAFE_REASONS.has(item.reason)) return item.reason
+    }
+  }
+  return 'status' in detail && typeof detail.status === 'string' && SAFE_REASONS.has(detail.status)
+    ? detail.status : undefined
+}
+
+const NETWORK_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT',
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET'])
+const TIMEOUT_CODES = new Set(['ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'])
+
+export function classifyProviderError(error: unknown): HttpError {
+  if (error instanceof HttpError) return error
+  if (error instanceof z.ZodError) return invalidResponse('validation')
+  if (error instanceof ApiError) {
+    const status = error.status
+    const reason = providerReason(error)
+    if (status === 408 || status === 504 || reason === 'DEADLINE_EXCEEDED') {
+      return new CoachError(504, 'The coach provider timed out. Please retry.', 'timeout', status, reason)
+    }
+    if (status === 429) return new CoachError(429, 'The coach provider is at capacity. Please retry later.', 'rate_limit', status, reason)
+    if (status === 401 || status === 403 || reason?.startsWith('API_KEY_')) {
+      return new CoachError(503, 'Gemini rejected authentication or denied access. Ask the project owner to check GEMINI_API_KEY and Google AI Studio project permissions in Vercel settings, then redeploy.', 'configuration', status, reason)
+    }
+    if (status === 404) {
+      return new CoachError(503, 'The configured Gemini model was not found or is unavailable to this API key. Ask the project owner to check GEMINI_MODEL and model access.', 'model_access', status, reason)
+    }
+    if (status >= 500 && status <= 599) {
+      return new CoachError(503, 'Gemini is temporarily unable to process the request. Please retry later.', 'provider_unavailable', status, reason)
+    }
+    return new CoachError(502, `Gemini rejected the request (HTTP ${status}). Ask the project owner to review the structured-output request and provider configuration.`, 'provider_rejection', status, reason)
+  }
+  // Fetch may attach nested connection errors as causes. Never log their messages.
+  let cause: unknown = error
+  let network = false
+  for (let depth = 0; depth < 5 && cause instanceof Error; depth++) {
+    if (cause.name === 'AbortError' || cause.name === 'TimeoutError' ||
+      ('code' in cause && typeof cause.code === 'string' && TIMEOUT_CODES.has(cause.code))) {
+      return new CoachError(504, 'The coach provider timed out. Please retry.', 'timeout')
+    }
+    if ((cause instanceof TypeError && cause.message === 'fetch failed') ||
+      ('code' in cause && typeof cause.code === 'string' && NETWORK_CODES.has(cause.code))) {
+      network = true
+    }
+    if (cause instanceof SyntaxError) return invalidResponse('json')
+    cause = cause.cause
+  }
+  if (network) return new CoachError(503, 'The coach provider could not be reached. Please retry.', 'network')
+  return new CoachError(500, 'The coach encountered an internal error. Ask the project owner to review the request diagnostics.', 'internal')
+}
+
+const FINISH_REASONS = new Set(['STOP', 'MAX_TOKENS', 'SAFETY', 'RECITATION', 'OTHER', 'BLOCKLIST',
+  'PROHIBITED_CONTENT', 'SPII', 'MALFORMED_FUNCTION_CALL', 'IMAGE_SAFETY', 'UNEXPECTED_TOOL_CALL',
+  'NO_IMAGE', 'IMAGE_PROHIBITED_CONTENT', 'IMAGE_OTHER', 'IMAGE_RECITATION', 'CONTINUATION'])
+
+export function responseText(response: GenerateContentResponse): string {
+  const finishReason = response.candidates?.[0]?.finishReason
+  if (finishReason !== 'STOP') {
+    const reason = finishReason ?? response.promptFeedback?.blockReason
+    throw invalidResponse('incomplete', reason && FINISH_REASONS.has(reason) ? reason : undefined)
+  }
+  const text = response.text
+  if (!text?.trim()) throw invalidResponse('empty')
+  return text
+}
+
+export async function generateSuggestion(request: CoachRequest) {
+  const payload = suggestionRequest(request)
+  const apiKey = process.env.GEMINI_API_KEY?.trim()
+  if (!apiKey) {
+    throw new CoachError(503, 'The coach provider is not configured. Ask the project owner to set GEMINI_API_KEY in Vercel project environment settings and redeploy.', 'configuration')
+  }
+  const client = new GoogleGenAI({ apiKey, vertexai: false, httpOptions: GEMINI_HTTP_OPTIONS })
+  let text: string
+  try {
+    const response = await client.models.generateContent(payload)
+    text = responseText(response)
+  } catch (error) {
+    throw classifyProviderError(error)
+  }
   let output: unknown
   try {
     output = JSON.parse(text)
   } catch {
-    throw invalidResponse(request.action, 'json')
+    throw invalidResponse('json')
   }
   const parsed = suggestionSchema.safeParse(output)
   if (!parsed.success || parsed.data.action !== request.action ||
     new Set(parsed.data.sourceIds).size !== parsed.data.sourceIds.length ||
-    parsed.data.sourceIds.some((id) => !request.sourceIds.includes(id) || !sources.some((source) => source.id === id))) {
-    throw invalidResponse(request.action, 'validation')
+    parsed.data.sourceIds.some((id) => !request.sourceIds.includes(id))) {
+    throw invalidResponse('validation')
   }
   return parsed.data
 }

@@ -100,6 +100,7 @@ beforeEach(() => {
   generateContentMock.mockReset()
   options.length = 0
   generateContentMock.mockResolvedValue(providerResponse(challenge))
+  vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -225,6 +226,7 @@ describe('coach API', () => {
     expect(result.data).toMatchObject({ requestId, suggestion: challenge })
     expect(options).toEqual([{
       apiKey: 'test-key',
+      vertexai: false,
       httpOptions: { timeout: 25_000, retryOptions: { attempts: 1 } },
     }])
     const args = generateContentMock.mock.calls[0]![0]
@@ -233,6 +235,7 @@ describe('coach API', () => {
       config: {
         responseMimeType: 'application/json',
         maxOutputTokens: 2200,
+        automaticContinuation: false,
         responseJsonSchema: { type: 'object', additionalProperties: false },
       },
     })
@@ -343,7 +346,10 @@ describe('coach API', () => {
     const result = await call(coach, { cookie, body: request() })
     expect(result.status).toBe(502)
     expect(result.data).toEqual({ error: expect.stringContaining('failed the coach validation checks') })
-    expect(log).toHaveBeenCalledExactlyOnceWith('Gemini coach response rejected', { action: 'challenge', reason: 'validation' })
+    expect(log).toHaveBeenCalledExactlyOnceWith('Gemini coach failure', expect.objectContaining({
+      action: 'challenge', category: 'validation', model: 'gemini-3.8-flash',
+      requestId: result.headers['x-request-id'], providerStatus: null,
+    }))
   })
   it('rejects incorrect rehearsal totals and unsafe representations', async () => {
     const cookie = await login()
@@ -357,10 +363,13 @@ describe('coach API', () => {
     }
   })
   it.each([
-    { response: providerResponse(challenge, 'MAX_TOKENS'), reason: 'incomplete', message: 'did not finish the response normally' },
-    { response: providerResponse(challenge, 'SAFETY'), reason: 'incomplete', message: 'did not finish the response normally' },
-    { response: { text: undefined, candidates: [{ finishReason: 'STOP' }] }, reason: 'empty', message: 'returned no response text' },
-    { response: { text: '{sensitive invalid json', candidates: [{ finishReason: 'STOP' }] }, reason: 'json', message: 'returned malformed JSON' },
+    { response: providerResponse(challenge, 'MAX_TOKENS'), reason: 'incomplete_generation', message: 'did not finish the response normally' },
+    { response: providerResponse(challenge, 'SAFETY'), reason: 'incomplete_generation', message: 'did not finish the response normally' },
+    { response: { candidates: [] }, reason: 'incomplete_generation', message: 'did not finish the response normally' },
+    { response: { text: undefined, candidates: [{ finishReason: 'STOP' }] }, reason: 'empty_response', message: 'returned no response text' },
+    { response: { text: '  ', candidates: [{ finishReason: 'STOP' }] }, reason: 'empty_response', message: 'returned no response text' },
+    { response: { text: '{sensitive invalid json', candidates: [{ finishReason: 'STOP' }] }, reason: 'invalid_json', message: 'returned malformed JSON' },
+    { response: { text: '{"action":', candidates: [{ finishReason: 'MAX_TOKENS' }] }, reason: 'incomplete_generation', message: 'did not finish the response normally' },
   ])('explains $reason responses without exposing provider content or using fallback', async ({ response, reason, message }) => {
     const cookie = await login()
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -371,7 +380,9 @@ describe('coach API', () => {
     expect(result.data).toEqual({ error: expect.stringContaining('Your work is unchanged') })
     expect(JSON.stringify(result.data)).not.toContain('sensitive')
     expect(result.data).not.toHaveProperty('suggestion')
-    expect(log).toHaveBeenCalledExactlyOnceWith('Gemini coach response rejected', { action: 'challenge', reason })
+    expect(log).toHaveBeenCalledExactlyOnceWith('Gemini coach failure', expect.objectContaining({
+      action: 'challenge', category: reason, requestId: result.headers['x-request-id'],
+    }))
   })
   it('fails honestly without a configured provider key and never invokes it', async () => {
     const cookie = await login()
@@ -388,26 +399,31 @@ describe('coach API', () => {
     expect(options[0]).toMatchObject({ apiKey: 'test-key' })
   })
   it.each([
-    [400, 'Gemini rejected the request (HTTP 400)'],
-    [401, 'Gemini rejected authentication or denied access'],
-    [403, 'Gemini rejected authentication or denied access'],
-    [404, 'The configured Gemini model was not found or is unavailable'],
-    [500, 'Gemini is temporarily unable to process the request'],
-    [503, 'Gemini is temporarily unable to process the request'],
-    [422, 'Gemini rejected the request (HTTP 422)'],
-    [502, 'Gemini is temporarily unable to process the request'],
-  ])('explains provider HTTP %i without exposing provider details or educator text', async (status, message) => {
+    [400, 502, 'provider_rejection', 'Gemini rejected the request (HTTP 400)'],
+    [401, 503, 'configuration', 'Gemini rejected authentication or denied access'],
+    [403, 503, 'configuration', 'Gemini rejected authentication or denied access'],
+    [404, 503, 'model_access', 'The configured Gemini model was not found or is unavailable'],
+    [500, 503, 'provider_unavailable', 'Gemini is temporarily unable to process the request'],
+    [503, 503, 'provider_unavailable', 'Gemini is temporarily unable to process the request'],
+    [422, 502, 'provider_rejection', 'Gemini rejected the request (HTTP 422)'],
+    [502, 503, 'provider_unavailable', 'Gemini is temporarily unable to process the request'],
+    [408, 504, 'timeout', 'The coach provider timed out'],
+    [504, 504, 'timeout', 'The coach provider timed out'],
+  ])('explains provider HTTP %i without exposing provider details or educator text', async (status, appStatus, category, message) => {
     const cookie = await login()
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     generateContentMock.mockRejectedValueOnce(new ApiError({ status, message: 'sensitive provider detail test-key' }))
     const result = await call(coach, { cookie, body: request() })
-    expect(result.status).toBe(502)
+    expect(result.status).toBe(appStatus)
     expect(result.data).toEqual({ error: expect.stringContaining(message) })
     expect(result.data).toEqual({ error: expect.stringContaining('Your work is unchanged') })
     expect(JSON.stringify(result.data)).not.toContain('sensitive provider detail')
     expect(JSON.stringify(result.data)).not.toContain('test-key')
     expect(result.data).not.toHaveProperty('suggestion')
-    expect(log).toHaveBeenCalledExactlyOnceWith('Gemini coach request failed', { status, action: 'challenge' })
+    expect(log).toHaveBeenCalledExactlyOnceWith('Gemini coach failure', {
+      providerStatus: status, action: 'challenge', category, providerReason: null,
+      model: 'gemini-3.8-flash', requestId: result.headers['x-request-id'],
+    })
   })
   it('sanitizes rate-limit, timeout, connection, SDK parse and unexpected errors', async () => {
     const cookie = await login()
@@ -415,20 +431,44 @@ describe('coach API', () => {
     const cases = [
       { error: new ApiError({ status: 429, message: 'sensitive detail' }), status: 429 },
       { error: Object.assign(new Error('sensitive detail'), { name: 'TimeoutError' }), status: 504 },
-      { error: new TypeError('sensitive detail'), status: 502 },
+      { error: new TypeError('fetch failed', { cause: Object.assign(new Error('sensitive detail'), { code: 'ENOTFOUND' }) }), status: 503 },
       { error: new SyntaxError('sensitive detail'), status: 502 },
-      { error: new ApiError({ status: 500, message: 'sensitive detail' }), status: 502 },
+      { error: new ApiError({ status: 500, message: 'sensitive detail' }), status: 503 },
+      { error: new Error('SDK wrapper sensitive detail', { cause: new DOMException('sensitive detail', 'AbortError') }), status: 504 },
+      { error: new Error('SDK wrapper', { cause: new TypeError('fetch failed', {
+        cause: Object.assign(new Error('sensitive detail'), { code: 'ETIMEDOUT' }),
+      }) }), status: 504 },
+      { error: new Error('sensitive programming error'), status: 500 },
+      { error: new TypeError('sensitive programming error'), status: 500 },
     ]
     for (const item of cases) {
       generateContentMock.mockRejectedValueOnce(item.error)
       const result = await call(coach, { cookie, body: request() })
       expect(result.status).toBe(item.status)
       expect(JSON.stringify(result.data)).not.toContain('sensitive detail')
-      expect(result.data).toEqual({ error: expect.stringContaining('Your work is unchanged; please retry') })
+      expect(result.data).toEqual({ error: expect.stringContaining('Your work is unchanged') })
       expect(result.data).not.toHaveProperty('suggestion')
     }
-    expect(log).toHaveBeenCalledWith('Gemini coach request failed', { action: 'challenge', reason: 'timeout' })
-    expect(log).toHaveBeenCalledWith('Gemini coach request failed', { action: 'challenge', reason: 'sdk_or_connection' })
+    expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({ action: 'challenge', category: 'timeout' }))
+    expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({ action: 'challenge', category: 'network' }))
     expect(JSON.stringify(log.mock.calls)).not.toContain('sensitive detail')
+  })
+  it.each([
+    ['API_KEY_INVALID', 'configuration', 503],
+    ['sensitive detail test-key', 'provider_rejection', 502],
+  ])('only logs allowlisted provider reasons (%s)', async (reason, category, status) => {
+    const cookie = await login()
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    generateContentMock.mockRejectedValueOnce(new ApiError({ status: 400, message: JSON.stringify({
+      error: { status: 'INVALID_ARGUMENT', message: 'sensitive detail test-key', details: [{ reason, metadata: { secret: 'test-key' } }] },
+    }) }))
+    const result = await call(coach, { cookie, body: request() })
+    expect(result.status).toBe(status)
+    expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({
+      category, providerStatus: 400, providerReason: reason === 'API_KEY_INVALID' ? reason : 'INVALID_ARGUMENT',
+    }))
+    expect(JSON.stringify(log.mock.calls)).not.toContain('test-key')
+    expect(JSON.stringify(log.mock.calls)).not.toContain(request().educatorInterpretation)
+    expect(JSON.stringify(result.data)).not.toContain('test-key')
   })
 })

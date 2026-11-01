@@ -22,7 +22,7 @@ Click **Challenge my interpretation**. Inspect the actual returned hypothesis, p
 
 Click **Reject suggestion**. Point to the unchanged interpretation and inquiry; expand the rejected decision in the trail. “Rejecting is valid and does not block me.”
 
-Return to **1 Challenge**, click **Try another challenge**, and inspect this fresh live response. Click **Accept suggestion**. “Only the proposed inquiry moves into an editable draft. My original interpretation is preserved.”
+Return to **1 Challenge**, click **Try another challenge**, and inspect this fresh live response. Click **Accept suggestion**. “The proposed revision copies into my editable interpretation. Acceptance is not confirmation.” Edit if needed, then click **Confirm interpretation and continue**.
 
 ## 1:10–1:45 · Refine, then confirm
 
