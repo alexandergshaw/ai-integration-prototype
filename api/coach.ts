@@ -17,7 +17,13 @@ export default async function coach(req: Request, res: ServerResponse) {
     requireSession(req)
     const parsed = coachRequestSchema.safeParse(await readJson(req))
     if (!parsed.success) throw new HttpError(400, 'Invalid coach request.')
-    const suggestion = await generateSuggestion(parsed.data)
+    const suggestion = await generateSuggestion(parsed.data).catch((error: unknown) => {
+      // Only known generation failures qualify; request/source validation stays application-owned.
+      if (error instanceof HttpError && [429, 502, 503, 504].includes(error.status)) {
+        throw new HttpError(error.status, error.message, 'provider_failure')
+      }
+      throw error
+    })
     json(res, 200, { id: randomUUID(), requestId: parsed.data.requestId, suggestion })
   } catch (error) {
     failure(res, error)

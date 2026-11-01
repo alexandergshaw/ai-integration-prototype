@@ -87,6 +87,10 @@ textarea { resize: vertical; min-height: 100px; }
 .decision-record { border-bottom: 1px solid var(--line); padding: 12px 0; }
 .decision-record summary { font-size: 12px; line-height: 1.6; cursor: pointer; }
 .decision-record summary b { display: inline-block; text-transform: capitalize; font-size: 11px; font-weight: 500; color: var(--teal); margin-left: 8px; }
+.decision-record summary > .status-label { display: block; }
+.demo-provenance { margin: 8px 0 16px; }
+.demo-provenance details { margin-top: 6px; }
+.demo-provenance p { font-size: 11px; line-height: 1.6; color: var(--muted); }
 .decision-record p, .decision-record time { font-size: 11px; line-height: 1.65; color: var(--muted); }
 .history-content { white-space: pre-wrap; }
 .duration { white-space: nowrap; font-size: 11px; font-weight: 400; }

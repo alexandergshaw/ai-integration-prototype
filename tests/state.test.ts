@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { initialState, reducer, requestFor, type State } from '../src/features/ai-decision/state'
 import { suggestionSchema, type Suggestion } from '../shared/schemas'
 import { challenge, refinement, rehearsal } from './fixtures'
+import { demoExample, validateSuggestion } from '../shared/demoExamples'
+import type { CoachAction } from '../shared/schemas'
 
 const requestId = '11111111-1111-4111-8111-111111111111'
 function receive(state: State, suggestion: Suggestion) {
@@ -75,6 +77,99 @@ describe('Confirmation and stale-response boundaries', () => {
     expect(next.inquiryDraft).toBe(initialState.inquiryDraft)
     expect(next.decisions).toEqual([])
     expect(next.confirmedInquiry).toBe('')
+  })
+
+  describe('Manual demo fallback transitions', () => {
+    function failed(state = initialState, action: CoachAction = 'challenge', eligible = true) {
+      return reducer(reducer(state, { type: 'start', id: requestId, action }), {
+        type: 'error', requestId, message: 'Gemini unavailable.', eligible,
+      })
+    }
+    function useDemo(state: State) {
+      return reducer(state, { type: 'demo', failedRequestId: requestId, id: crypto.randomUUID(), at: '2026-11-01T12:00:00Z' })
+    }
+    it.each(['challenge', 'refine_inquiry', 'suggest_activity'] as const)('validates and selects the %s fixture without changing drafts', (action) => {
+      const state = failed(confirmedState, action)
+      const next = useDemo(state)
+      expect(suggestionSchema.safeParse(demoExample(action)).success).toBe(true)
+      expect(next.pending?.suggestion).toEqual(demoExample(action))
+      expect(next.pending?.origin).toBe('demo')
+      expect(next.fallback).toBeNull()
+      expect(next.error).toBe('Gemini unavailable.')
+      expect(next.educatorInterpretation).toBe(state.educatorInterpretation)
+      expect(next.inquiryDraft).toBe(state.inquiryDraft)
+      expect(next.activityDraft).toBe(state.activityDraft)
+      const rejected = decide(next, 'rejected')
+      expect(rejected.decisions[0]).toMatchObject({ origin: 'demo', choice: 'rejected', appliedToDraft: false })
+      expect(rejected.activityDraft).toBe(state.activityDraft)
+      expect(rejected.inquiryDraft).toBe(state.inquiryDraft)
+      expect(rejected.educatorInterpretation).toBe(state.educatorInterpretation)
+    })
+    it('uses the exact activity math, fifteen minutes, two prompts and unique allowlisted sources', () => {
+      const example = demoExample('suggest_activity')
+      if (example.action !== 'suggest_activity') throw new Error('Wrong example')
+      expect(example.activity.steps.reduce((sum, step) => sum + step.minutes, 0)).toBe(15)
+      expect(example.activity.discussionPrompts).toHaveLength(2)
+      expect(example.activity.representation).toBe('0.3 × 0.4 = 0.12; three tenths of four tenths; 12 overlapping hundredths on a 10 × 10 area model.')
+      for (const action of ['challenge', 'refine_inquiry', 'suggest_activity'] as const) {
+        const fixture = demoExample(action)
+        expect(validateSuggestion(fixture, action)).toEqual(fixture)
+        expect(new Set(fixture.sourceIds).size).toBe(fixture.sourceIds.length)
+        expect(() => validateSuggestion({ ...fixture, sourceIds: ['work-A', 'work-A'] }, action)).toThrow()
+        expect(() => validateSuggestion({ ...fixture, sourceIds: ['invented'] }, action)).toThrow()
+      }
+    })
+    it('requires eligibility, ignores double-clicks and late success/error, and uses unique suggestion IDs', () => {
+      expect(useDemo(initialState)).toBe(initialState)
+      expect(useDemo(failed(initialState, 'challenge', false)).pending).toBeNull()
+      const state = useDemo(failed())
+      expect(useDemo(state)).toBe(state)
+      expect(state.decisions).toHaveLength(1)
+      expect(reducer(state, { type: 'received', requestId, id: crypto.randomUUID(), suggestion: challenge, at: '' })).toBe(state)
+      expect(reducer(state, { type: 'error', requestId, message: 'Late failure', eligible: true })).toBe(state)
+      const next = useDemo(failed(decide(state, 'rejected')))
+      expect(next.pending?.id).not.toBe(state.pending?.id)
+    })
+    it('preserves accepted-draft provenance through edits and confirmation, with separate alignment review', () => {
+      let state = decide(useDemo(failed(confirmedState, 'suggest_activity')), 'accepted')
+      expect(state.confirmedActivity).toBe('')
+      expect(state.activityNeedsReview).toBe(true)
+      expect(state.activityInquiry).toBe('')
+      expect(state.draftSources.activityDraft).toMatchObject({ origin: 'demo', id: state.decisions[0].id })
+      state = reducer(state, { type: 'edit', field: 'activityDraft', value: `${state.activityDraft}\nEducator adjustment` })
+      expect(state.draftSources.activityDraft?.origin).toBe('demo')
+      expect(reducer(state, { type: 'confirmActivity' }).confirmedActivity).toBe('')
+      state = reducer(state, { type: 'reviewActivity' })
+      state = reducer(state, { type: 'confirmActivity' })
+      expect(state.confirmedActivity).toBe(state.activityDraft)
+      expect(state.decisions[0]).toMatchObject({ origin: 'demo', choice: 'accepted' })
+      state = reducer(state, { type: 'edit', field: 'inquiryDraft', value: 'How do learners identify the whole?' })
+      state = reducer(state, { type: 'confirmInquiry' })
+      expect(state.activityNeedsReview).toBe(true)
+      expect(state.confirmedActivity).toBe('')
+    })
+    it.each(['edit', 'step', 'start', 'cancel', 'confirmInterpretation', 'reset'] as const)('invalidates eligibility on %s', (type) => {
+      const state = failed()
+      const next = type === 'edit' ? reducer(state, { type, field: 'educatorInterpretation', value: 'New text' }) :
+        type === 'step' ? reducer(state, { type, step: 1 }) :
+          type === 'start' ? reducer(state, { type, id: crypto.randomUUID(), action: 'challenge' }) :
+            reducer(state, { type })
+      expect(next.fallback).toBeNull()
+      expect(useDemo(next).pending).toBeNull()
+    })
+    it('invalidates eligibility when confirmed inquiry or alignment context changes', () => {
+      const state = failed(confirmedState, 'suggest_activity')
+      expect(reducer(state, { type: 'confirmInquiry' }).fallback).toBeNull()
+      expect(reducer(state, { type: 'reviewActivity' }).fallback).toBeNull()
+      const stale = { ...state, confirmedInquiry: 'A different confirmed inquiry' }
+      expect(useDemo(stale)).toBe(stale)
+    })
+    it('does not make successful requests eligible and records live provenance separately', () => {
+      const state = receive(initialState, challenge)
+      expect(state.fallback).toBeNull()
+      expect(state.pending?.origin).toBe('gemini')
+      expect(state.decisions[0].origin).toBe('gemini')
+    })
   })
   it('requires confirmed inquiry for activity requests', () => {
     expect(reducer(initialState, { type: 'start', id: requestId, action: 'suggest_activity' })).toEqual(initialState)

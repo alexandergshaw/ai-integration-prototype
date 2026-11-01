@@ -227,6 +227,19 @@ describe('request boundary', () => {
 })
 
 describe('coach API', () => {
+  it('keeps session, same-origin, invalid source/request, and session-configuration failures ineligible', async () => {
+    const cookie = await login()
+    const failures = [
+      await call(coach, { body: request() }),
+      await call(coach, { cookie, body: request(), headers: { origin: 'https://evil.example' } }),
+      await call(coach, { cookie, body: request({ sourceIds: ['unavailable'] }) }),
+      await call(coach, { cookie, body: request({ extra: true }) }),
+    ]
+    vi.stubEnv('SESSION_SECRET', '')
+    failures.push(await call(coach, { cookie, body: request() }))
+    for (const result of failures) expect(result.data).toMatchObject({ category: 'application_failure' })
+    expect(generateContentMock).not.toHaveBeenCalled()
+  })
   it('authenticates before paid calls and guards all other methods', async () => {
     expect((await call(coach, { body: request() })).status).toBe(401)
     for (const method of ['GET', 'DELETE', 'PUT', 'PATCH', 'OPTIONS']) {
@@ -364,7 +377,7 @@ describe('coach API', () => {
     generateContentMock.mockResolvedValueOnce(providerResponse(output))
     const result = await call(coach, { cookie, body: request() })
     expect(result.status).toBe(502)
-    expect(result.data).toEqual({ error: expect.stringContaining('failed the coach validation checks') })
+    expect(result.data).toEqual({ error: expect.stringContaining('failed the coach validation checks'), category: 'provider_failure' })
     expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({
       requestId, action: 'challenge', model: 'gemini-2.5-flash', stage: 'validation',
       category: expect.any(String), validationIssues: expect.any(Array),
@@ -389,7 +402,7 @@ describe('coach API', () => {
     generateContentMock.mockResolvedValueOnce(providerResponse(invalid))
     const result = await call(coach, { cookie, body: request() })
     expect(result.status).toBe(502)
-    expect(result.data).toEqual({ error: expect.stringContaining('failed the coach validation checks') })
+    expect(result.data).toEqual({ error: expect.stringContaining('failed the coach validation checks'), category: 'provider_failure' })
     expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({
       requestId,
       stage: 'validation',
@@ -410,7 +423,7 @@ describe('coach API', () => {
     })
     const result = await call(coach, { cookie, body: request() })
     expect(result.status).toBe(502)
-    expect(result.data).toEqual({ error: expect.stringContaining('no candidate or blocked') })
+    expect(result.data).toEqual({ error: expect.stringContaining('no candidate or blocked'), category: 'provider_failure' })
     expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({
       requestId,
       stage: 'response',
@@ -430,8 +443,8 @@ describe('coach API', () => {
     generateContentMock.mockResolvedValueOnce(response)
     const result = await call(coach, { cookie, body: request() })
     expect(result.status).toBe(502)
-    expect(result.data).toEqual({ error: expect.stringContaining(message) })
-    expect(result.data).toEqual({ error: expect.stringContaining('Your work is unchanged') })
+    expect(result.data).toEqual({ error: expect.stringContaining(message), category: 'provider_failure' })
+    expect(result.data).toEqual({ error: expect.stringContaining('Your work is unchanged'), category: 'provider_failure' })
     expect(JSON.stringify(result.data)).not.toContain('sensitive')
     expect(result.data).not.toHaveProperty('suggestion')
     expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({
@@ -445,7 +458,7 @@ describe('coach API', () => {
     vi.stubEnv('GEMINI_API_KEY', '')
     const result = await call(coach, { cookie, body: request() })
     expect(result.status).toBe(503)
-    expect(result.data).toEqual({ error: expect.stringContaining('project owner to set GEMINI_API_KEY') })
+    expect(result.data).toEqual({ error: expect.stringContaining('project owner to set GEMINI_API_KEY'), category: 'provider_failure' })
     expect(generateContentMock).not.toHaveBeenCalled()
   })
   it('trims surrounding whitespace from the server-only API key', async () => {
@@ -469,8 +482,8 @@ describe('coach API', () => {
     generateContentMock.mockRejectedValueOnce(new ApiError({ status, message: 'sensitive provider detail test-key' }))
     const result = await call(coach, { cookie, body: request() })
     expect(result.status).toBe(502)
-    expect(result.data).toEqual({ error: expect.stringContaining(message) })
-    expect(result.data).toEqual({ error: expect.stringContaining('Your work is unchanged') })
+    expect(result.data).toEqual({ error: expect.stringContaining(message), category: 'provider_failure' })
+    expect(result.data).toEqual({ error: expect.stringContaining('Your work is unchanged'), category: 'provider_failure' })
     expect(JSON.stringify(result.data)).not.toContain('sensitive provider detail')
     expect(JSON.stringify(result.data)).not.toContain('test-key')
     expect(result.data).not.toHaveProperty('suggestion')
@@ -494,7 +507,7 @@ describe('coach API', () => {
       const result = await call(coach, { cookie, body: request() })
       expect(result.status).toBe(item.status)
       expect(JSON.stringify(result.data)).not.toContain('sensitive detail')
-      expect(result.data).toEqual({ error: expect.stringContaining('Your work is unchanged; please retry') })
+      expect(result.data).toEqual({ error: expect.stringContaining('Your work is unchanged; please retry'), category: 'provider_failure' })
       expect(result.data).not.toHaveProperty('suggestion')
     }
     expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({
