@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { initialState, reducer, requestFor, type State } from '../src/features/ai-decision/state'
 import { suggestionSchema, type Suggestion } from '../shared/schemas'
 import { challenge, refinement, rehearsal } from './fixtures'
-import { demoExample, validateSuggestion } from '../shared/demoExamples'
+import { demoExample, matchesExampleScenario, validateSuggestion } from '../shared/demoExamples'
 import type { CoachAction } from '../shared/schemas'
 
 const requestId = '11111111-1111-4111-8111-111111111111'
@@ -17,6 +17,9 @@ const confirmedState = {
   ...initialState, step: 3 as const, challengeDecided: true,
   confirmedInterpretation: initialState.educatorInterpretation, confirmedInquiry: initialState.inquiryDraft,
 }
+const inquiryState = { ...initialState, step: 2 as const, challengeDecided: true,
+  confirmedInterpretation: initialState.educatorInterpretation }
+const activityState = { ...confirmedState }
 
 describe('All six educator decisions', () => {
   it('accepts challenge into an editable interpretation draft without confirming it', () => {
@@ -88,14 +91,17 @@ describe('Confirmation and stale-response boundaries', () => {
     function useDemo(state: State) {
       return reducer(state, { type: 'demo', failedRequestId: requestId, id: crypto.randomUUID(), at: '2026-11-01T12:00:00Z' })
     }
+    function useCurrentGuide(state: State) {
+      return reducer(state, { type: 'demo', failedRequestId: state.fallback!.id, id: crypto.randomUUID(), at: '2026-11-01T12:00:00Z' })
+    }
     it.each(['challenge', 'refine_inquiry', 'suggest_activity'] as const)('validates and selects the %s fixture without changing drafts', (action) => {
-      const state = failed(confirmedState, action)
+      const state = failed(action === 'challenge' ? initialState : action === 'refine_inquiry' ? inquiryState : activityState, action)
       const next = useDemo(state)
       expect(suggestionSchema.safeParse(demoExample(action)).success).toBe(true)
       expect(next.pending?.suggestion).toEqual(demoExample(action))
       expect(next.pending?.origin).toBe('demo')
       expect(next.fallback).toBeNull()
-      expect(next.error).toBe('Gemini unavailable.')
+      expect(next.error).toBe('')
       expect(next.educatorInterpretation).toBe(state.educatorInterpretation)
       expect(next.inquiryDraft).toBe(state.inquiryDraft)
       expect(next.activityDraft).toBe(state.activityDraft)
@@ -148,21 +154,55 @@ describe('Confirmation and stale-response boundaries', () => {
       expect(state.activityNeedsReview).toBe(true)
       expect(state.confirmedActivity).toBe('')
     })
-    it.each(['edit', 'step', 'start', 'cancel', 'confirmInterpretation', 'reset'] as const)('invalidates eligibility on %s', (type) => {
+    it.each(['edit', 'step', 'start', 'cancel', 'confirmInterpretation', 'reset'] as const)('keeps guided support current on %s', (type) => {
       const state = failed()
       const next = type === 'edit' ? reducer(state, { type, field: 'educatorInterpretation', value: 'New text' }) :
         type === 'step' ? reducer(state, { type, step: 1 }) :
           type === 'start' ? reducer(state, { type, id: crypto.randomUUID(), action: 'challenge' }) :
             reducer(state, { type })
-      expect(next.fallback).toBeNull()
-      expect(useDemo(next).pending).toBeNull()
+      if (type === 'start') {
+        expect(next.guide).toBe(true)
+        expect(next.fallback).toBeNull()
+      } else if (type === 'reset') {
+        expect(next.guide).toBe(false)
+        expect(next.fallback).toBeNull()
+      } else if (type === 'cancel') {
+        expect(next.guide).toBe(true)
+        expect(next.fallback?.snapshot).toEqual(requestFor(next, 'challenge', next.fallback?.id ?? ''))
+      } else {
+        expect(next.guide).toBe(true)
+        expect(next.fallback?.snapshot).toEqual(requestFor(next, next.step === 1 ? 'challenge' : next.step === 2 ? 'refine_inquiry' : 'suggest_activity', next.fallback?.id ?? ''))
+      }
+      if (next.fallback) {
+        expect(next.fallback.id).not.toBe(requestId)
+        expect(useDemo(next).pending).toBeNull()
+        expect(useCurrentGuide(next).pending).toBeTruthy()
+      }
     })
-    it('invalidates eligibility when confirmed inquiry or alignment context changes', () => {
+    it('refreshes guide snapshots when confirmed inquiry or alignment context changes', () => {
       const state = failed(confirmedState, 'suggest_activity')
-      expect(reducer(state, { type: 'confirmInquiry' }).fallback).toBeNull()
-      expect(reducer(state, { type: 'reviewActivity' }).fallback).toBeNull()
+      const reconfirmed = reducer(state, { type: 'confirmInquiry' })
+      expect(reconfirmed.fallback?.snapshot)
+        .toEqual(requestFor(reconfirmed, 'suggest_activity', reconfirmed.fallback?.id ?? ''))
+      const reviewed = reducer(state, { type: 'reviewActivity' })
+      expect(reviewed.fallback?.snapshot)
+        .toEqual(requestFor(reviewed, 'suggest_activity', reviewed.fallback?.id ?? ''))
       const stale = { ...state, confirmedInquiry: 'A different confirmed inquiry' }
       expect(useDemo(stale)).toBe(stale)
+    })
+    it('requires exact scenario metadata before example selection', () => {
+      expect(matchesExampleScenario(initialState.scenario, ['assessment-2026-10-28', 'work-A', 'work-B', 'work-C'])).toBe(true)
+      const mismatches = [
+        { ...initialState.scenario!, grade: 4 },
+        { ...initialState.scenario!, topic: 'decimal-addition' },
+        { ...initialState.scenario!, sourceIds: ['assessment-2026-10-28', 'work-A', 'work-B'] },
+      ]
+      for (const scenario of mismatches) {
+        const state = failed()
+        expect(matchesExampleScenario(scenario, ['assessment-2026-10-28', 'work-A', 'work-B', 'work-C'])).toBe(false)
+        const mismatchedState = { ...state, scenario }
+        expect(useDemo(mismatchedState)).toBe(mismatchedState)
+      }
     })
     it('does not make successful requests eligible and records live provenance separately', () => {
       const state = receive(initialState, challenge)

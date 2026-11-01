@@ -25,3 +25,10 @@ export const evidence = [
 ] as const
 
 export const sourceIds = evidence.map((source) => source.id)
+
+export const workspaceScenario = {
+  id: 'fictional-grade5-decimals-2026-10-28',
+  grade: 5,
+  topic: 'decimal-multiplication',
+  sourceIds,
+} as const

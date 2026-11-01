@@ -34,6 +34,10 @@ Onboarding, dashboards, assessment exploration, lesson browsing, full agendas, s
 
 ## Proposed pilot measurements—not observed results
 
+Guided planning is an ordinary optional path, not a simulated model response. Short local prompts support reasoning without assessing the current draft. Examples use explicit scenario metadata rather than keyword-based alignment claims. They retain the existing validated suggestion/review mechanism, separate acceptance and confirmation, citation checks, and built-in activity alignment review. Requests have a single retirement helper for timer clearing, abort and identity invalidation; the eight-second UI threshold is an adjustable prototype choice, not an outage diagnosis. Server failure diagnostics remain safe and unchanged; session-local outcome, provenance, decisions and confirmations are not persistent analytics.
+
+Evaluate the guided journey with proposed tasks: can an educator finish all three steps without AI; is any draft lost during switching; can they explain the evidence behind the inquiry; can they distinguish AI from built-in support; and how many actions or interruptions does switching introduce? No usability or effectiveness results are claimed.
+
 If a future authorized pilot adds instrumentation, measure:
 
 | Measure | Unit |

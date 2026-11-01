@@ -29,7 +29,10 @@ export function json(res: ServerResponse, status: number, data: unknown) {
 
 export function failure(res: ServerResponse, error: unknown) {
   if (error instanceof HttpError) json(res, error.status, { error: error.message, category: error.category })
-  else json(res, 500, { error: 'The request could not be completed.', category: 'application_failure' })
+  else {
+    console.error('Request failure', { category: 'platform_failure' })
+    json(res, 500, { error: 'The request could not be completed.', category: 'platform_failure' })
+  }
 }
 
 export function sameOrigin(req: Request) {

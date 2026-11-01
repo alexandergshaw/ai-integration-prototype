@@ -1,6 +1,6 @@
 import type { Activity, CoachAction, CoachRequest, Suggestion } from '../../../shared/schemas'
-import { sourceIds } from '../../../shared/evidence'
-import { demoExample } from '../../../shared/demoExamples'
+import { sourceIds, workspaceScenario } from '../../../shared/evidence'
+import { demoExample, matchesExampleScenario, type ExampleScenario } from '../../../shared/demoExamples'
 
 export type Origin = 'gemini' | 'demo'
 type SuggestionRecord = { id: string; suggestion: Suggestion; origin: Origin }
@@ -15,6 +15,7 @@ export type Decision = {
   origin: Origin
 }
 export type State = {
+  scenario: ExampleScenario | null
   educatorInterpretation: string
   confirmedInterpretation: string
   inquiryDraft: string
@@ -30,16 +31,22 @@ export type State = {
   fallback: FailedRequest | null
   draftSources: Partial<Record<'educatorInterpretation' | 'inquiryDraft' | 'activityDraft', SuggestionRecord>>
   error: string
+  guide: boolean
+  supportRevision: number
+  supportBlocked: boolean
+  outcome: 'ai_success' | 'provider_failure' | 'ui_deadline' | 'guided_activation' | 'cancelled' | null
   decisions: Decision[]
 }
 
 export const initialState: State = {
+  scenario: workspaceScenario,
   educatorInterpretation: 'Many students can select the correct product but may be relying on decimal-placement procedures instead of understanding place value.',
   confirmedInterpretation: '',
   inquiryDraft: 'How can we tell whether students understand why multiplying tenths produces hundredths?',
   confirmedInquiry: '', activityDraft: '', confirmedActivity: '', activityInquiry: '',
   activityNeedsReview: false, step: 1, challengeDecided: false,
   pending: null, request: null, fallback: null, draftSources: {}, error: '', decisions: [],
+  guide: false, supportRevision: 0, supportBlocked: false, outcome: null,
 }
 
 export function formatActivity(activity: Activity): string {
@@ -63,6 +70,7 @@ type Event =
   | { type: 'start'; id: string; action: CoachAction }
   | { type: 'received'; requestId: string; id: string; suggestion: Suggestion; at: string }
   | { type: 'error'; requestId: string; message: string; eligible?: boolean }
+  | { type: 'guide'; outcome?: 'guided_activation' | 'ui_deadline'; requestId?: string }
   | { type: 'demo'; failedRequestId: string; id: string; at: string }
   | { type: 'cancel' }
   | { type: 'decide'; choice: 'accepted' | 'rejected'; at: string }
@@ -81,11 +89,12 @@ function discardPending(state: State): State {
   }
 }
 
-export function reducer(state: State, event: Event): State {
+function transition(state: State, event: Event): State {
   switch (event.type) {
     case 'reset': return { ...initialState }
     case 'edit': return {
-      ...discardPending(state), [event.field]: event.value, request: null, fallback: null, error: '',
+      ...discardPending(state), [event.field]: event.value, request: null, fallback: null,
+      error: state.supportBlocked ? state.error : '',
       ...(event.field === 'activityDraft' ? { confirmedActivity: '' } : {}),
       ...(event.field === 'educatorInterpretation' ? { challengeDecided: false, step: 1 as const } : {}),
     }
@@ -103,13 +112,13 @@ export function reducer(state: State, event: Event): State {
         state.educatorInterpretation.trim() !== state.confirmedInterpretation ||
         !state.confirmedInquiry ||
         state.inquiryDraft.trim() !== state.confirmedInquiry)) return state
-      return { ...discardPending(state), request: {
+      return { ...discardPending(state), supportBlocked: false, request: {
         id: event.id, action: event.action, snapshot: requestFor(state, event.action, event.id), step: state.step,
       }, fallback: null, error: '' }
     case 'received':
       if (state.request?.id !== event.requestId || state.request.action !== event.suggestion.action) return state
       return {
-        ...state, request: null, fallback: null, pending: { id: event.id, suggestion: event.suggestion, origin: 'gemini' },
+        ...state, guide: false, outcome: 'ai_success', request: null, fallback: null, pending: { id: event.id, suggestion: event.suggestion, origin: 'gemini' },
         decisions: [...state.decisions, {
           id: event.id, suggestion: event.suggestion, at: event.at,
           choice: 'awaiting decision', appliedToDraft: false, origin: 'gemini',
@@ -117,18 +126,26 @@ export function reducer(state: State, event: Event): State {
       }
     case 'error':
       return state.request?.id === event.requestId ? {
-        ...state, request: null, error: event.message, fallback: event.eligible ? state.request : null,
+        ...state, request: null, error: event.eligible ? '' : event.message,
+        guide: !!event.eligible, supportBlocked: !event.eligible,
+        outcome: event.eligible ? 'provider_failure' : null,
+        fallback: event.eligible ? state.request : null,
       } : state
+    case 'guide':
+      if (state.supportBlocked || event.requestId && state.request?.id !== event.requestId) return state
+      return { ...discardPending(state), guide: true, request: null, error: '',
+        outcome: event.outcome ?? 'guided_activation' }
     case 'demo': {
       const failed = state.fallback
-      if (!failed || failed.id !== event.failedRequestId || state.request || state.pending ||
+      if (!matchesExampleScenario(state.scenario, sourceIds) ||
+        !failed || failed.id !== event.failedRequestId || state.request || state.pending ||
         failed.step !== state.step ||
         JSON.stringify(failed.snapshot) !== JSON.stringify(requestFor(state, failed.action, failed.id))) return state
       let suggestion: Suggestion
       try {
         suggestion = demoExample(failed.action)
       } catch {
-        return { ...state, fallback: null, error: 'The demo example failed validation. Your work is unchanged; continue with your draft.' }
+        return { ...state, fallback: null, error: 'This example is unavailable. Continue with your draft.' }
       }
       const record: SuggestionRecord = { id: event.id, suggestion, origin: 'demo' }
       return {
@@ -136,7 +153,7 @@ export function reducer(state: State, event: Event): State {
         decisions: [...state.decisions, { ...record, at: event.at, choice: 'awaiting decision', appliedToDraft: false }],
       }
     }
-    case 'cancel': return { ...state, request: null, fallback: null, error: 'Request cancelled. Your work is unchanged.' }
+    case 'cancel': return { ...state, guide: true, request: null, fallback: null, error: '', outcome: 'cancelled' }
     case 'continueWithoutChallenge':
       return reducer(state, { type: 'confirmInterpretation' })
     case 'decide': {
@@ -195,9 +212,20 @@ export function reducer(state: State, event: Event): State {
         activityInquiry: state.confirmedInquiry,
       }
     case 'confirmActivity':
-      if (!state.activityDraft.trim() || state.activityNeedsReview || !state.confirmedInterpretation ||
+      if (state.request || state.pending || !state.activityDraft.trim() || state.activityNeedsReview || !state.confirmedInterpretation ||
         state.educatorInterpretation.trim() !== state.confirmedInterpretation ||
         state.inquiryDraft.trim() !== state.confirmedInquiry || !state.confirmedInquiry) return state
       return { ...state, confirmedActivity: state.activityDraft, activityInquiry: state.confirmedInquiry, fallback: null }
   }
+}
+
+export function reducer(state: State, event: Event): State {
+  const next = transition(state, event)
+  if (next === state || !next.guide || next.pending || next.request || next.supportBlocked) return next
+  const action: CoachAction = next.step === 1 ? 'challenge' : next.step === 2 ? 'refine_inquiry' : 'suggest_activity'
+  if (next.fallback && next.fallback.action === action && next.fallback.step === next.step &&
+    JSON.stringify(next.fallback.snapshot) === JSON.stringify(requestFor(next, action, next.fallback.id))) return next
+  const supportRevision = next.supportRevision + 1
+  const id = `guided-${supportRevision}`
+  return { ...next, supportRevision, fallback: { id, action, step: next.step, snapshot: requestFor(next, action, id) } }
 }
