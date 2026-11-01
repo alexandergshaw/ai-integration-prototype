@@ -40,7 +40,9 @@ Gemini request failures do not change your drafts. Authentication/access errors 
 
 The provider schema converts Zod literal `const` constraints to single-value `enum` constraints supported by the pinned Gemini SDK, including the action and canonical mathematical representation. String-length limits remain enforced by server-side Zod validation, not the provider schema. After deploying schema changes, verify all three live actions; mocked tests cannot establish whether a particular API key and model accept the request.
 
-In **Vercel → Project → Logs**, filter for `/api/coach` and `Gemini coach request failed`. The app logs only the provider HTTP status and action, never the raw provider error, API key, or educator text. Check variables for the failing deployment environment and redeploy after any changes. Do not share credentials when troubleshooting.
+The browser's `/api/coach` HTTP 502 is the app's error status, not necessarily Gemini's status. The displayed error includes Gemini's HTTP status for otherwise unclassified provider rejections (such as HTTP 422), or distinguishes incomplete responses, empty text, malformed JSON, and failed validation. Those response failures do not by themselves establish a credential or configuration problem.
+
+In **Vercel → Project → Logs**, select the deployment you are actually using, clear restrictive filters, reproduce the failure, and look for `/api/coach`, `Gemini coach request failed`, or `Gemini coach response rejected`. The app logs only the provider HTTP status and action, or a fixed failure category—never raw provider errors, response content, API keys, or educator text. If logs are unavailable, use the displayed error to distinguish the failure. Check variables for the failing deployment environment and redeploy after any changes. If the old generic message remains after redeploying, check that the URL points to the new deployment. Do not share credentials when troubleshooting.
 
 ## Trust and cost boundaries
 
