@@ -38,6 +38,8 @@ AI runs only on a button click. Errors never replace educator work with a script
 
 Gemini request failures do not change your drafts. Authentication/access errors mean you should check `GEMINI_API_KEY` and the associated Google AI Studio project's permissions; model-not-found errors mean you should check `GEMINI_MODEL` and that project's model access. HTTP 400 means Gemini rejected the request: check the key, model, and structured-output configuration rather than assuming the output was invalid. Rate limits can reflect quota exhaustion; temporary provider failures can be retried later.
 
+The provider schema converts Zod literal `const` constraints to single-value `enum` constraints supported by the pinned Gemini SDK, including the action and canonical mathematical representation. String-length limits remain enforced by server-side Zod validation, not the provider schema. After deploying schema changes, verify all three live actions; mocked tests cannot establish whether a particular API key and model accept the request.
+
 In **Vercel → Project → Logs**, filter for `/api/coach` and `Gemini coach request failed`. The app logs only the provider HTTP status and action, never the raw provider error, API key, or educator text. Check variables for the failing deployment environment and redeploy after any changes. Do not share credentials when troubleshooting.
 
 ## Trust and cost boundaries
