@@ -9,8 +9,8 @@ export const SESSION_SECONDS = 2 * 60 * 60
 export function configuration() {
   const code = process.env.DEMO_ACCESS_CODE
   const secret = process.env.SESSION_SECRET
-  if (!code || code.trim().length < 24 || !secret || secret.trim().length < 32) {
-    throw new HttpError(503, 'Demo access is not configured. Ask the project owner to set DEMO_ACCESS_CODE (at least 24 characters) and SESSION_SECRET (at least 32 characters) in Vercel project environment settings and redeploy.')
+  if (!code?.trim() || !secret?.trim()) {
+    throw new HttpError(503, 'Demo access is not configured. Ask the project owner to set DEMO_ACCESS_CODE and SESSION_SECRET in Vercel project environment settings and redeploy.')
   }
   return { code, secret }
 }

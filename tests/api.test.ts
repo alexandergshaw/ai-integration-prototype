@@ -136,14 +136,21 @@ describe('session API', () => {
     expect(result.headers.allow).toBe('GET, POST, DELETE')
   })
   it.each([
-    ['DEMO_ACCESS_CODE', ''], ['DEMO_ACCESS_CODE', 'short'],
-    ['DEMO_ACCESS_CODE', ' '.repeat(40)], ['SESSION_SECRET', ''], ['SESSION_SECRET', 'short'],
-  ])('fails closed with invalid %s configuration', async (name, value) => {
+    ['DEMO_ACCESS_CODE', ''], ['DEMO_ACCESS_CODE', ' '.repeat(40)], ['SESSION_SECRET', ''], ['SESSION_SECRET', ' '],
+  ])('fails closed with blank %s configuration', async (name, value) => {
     vi.stubEnv(name, value)
     expect((await call(session, { method: 'GET' })).status).toBe(503)
     expect((await call(session, { body: { code } })).status).toBe(503)
     expect((await call(coach, { body: request() })).status).toBe(503)
     expect(generateContentMock).not.toHaveBeenCalled()
+  })
+  it('accepts short nonblank access codes and session secrets', async () => {
+    vi.stubEnv('DEMO_ACCESS_CODE', 'short')
+    vi.stubEnv('SESSION_SECRET', 'key')
+    const result = await call(session, { body: { code: 'short' } })
+    expect(result.status).toBe(200)
+    const cookie = result.headers['set-cookie']!.split(';')[0]!
+    expect((await call(session, { method: 'GET', cookie })).data).toEqual({ authenticated: true })
   })
   it('does not accept expired, future, malformed, duplicate or tampered sessions', async () => {
     const valid = await login()

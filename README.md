@@ -23,8 +23,8 @@ AI runs only on a button click. Errors never replace educator work with a script
    | --- | --- |
    | `GEMINI_API_KEY` | Your Google AI Studio Gemini API key |
    | `GEMINI_MODEL` | Optional model override; default `gemini-3.8-flash` |
-   | `DEMO_ACCESS_CODE` | A randomly generated access code of at least 24 characters |
-   | `SESSION_SECRET` | A separate randomly generated secret of at least 32 characters |
+   | `DEMO_ACCESS_CODE` | A nonblank access code |
+   | `SESSION_SECRET` | A separate nonblank secret for signing sessions |
 
    Use a password manager to generate both secrets. Never put credentials in a GitHub issue, PR, source file, screenshot, or a variable named `VITE_*`. `.env.example` lists names only.
 5. Configure cost protection before sharing: use a dedicated Gemini API key and Google AI Studio project, review available quotas, monitor use, and revoke the key if necessary. Configure Vercel Firewall rate limits on `/api/session` and `/api/coach` where your plan supports them; enable Vercel deployment protection for private rehearsals. Account budget alerts may not be hard spending caps—verify each platform's enforcement. The access code is not a substitute for distributed abuse protection.
