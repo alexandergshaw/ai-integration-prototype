@@ -1,4 +1,4 @@
-# InquiryLoop
+# Inquiry
 
 **AI challenges the reasoning; educators own the decision.**
 
