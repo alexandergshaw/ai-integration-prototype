@@ -1,0 +1,125 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import App, { Workspace } from '../src/App'
+import { initialState } from '../src/features/ai-decision/state'
+import { challenge, refinement, rehearsal } from './fixtures'
+import type { Suggestion } from '../shared/schemas'
+
+const fetchMock = vi.fn()
+function modelResponse(suggestion: Suggestion) {
+  fetchMock.mockImplementationOnce(async (_url, options) => ({
+    ok: true, status: 200,
+    json: async () => ({ id: crypto.randomUUID(), requestId: JSON.parse(options.body).requestId, suggestion }),
+  }))
+}
+beforeEach(() => {
+  vi.stubGlobal('fetch', fetchMock)
+  vi.stubGlobal('matchMedia', () => ({ matches: true }))
+  fetchMock.mockReset()
+})
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+
+describe('Workspace interaction and provider-idle boundaries', () => {
+  it('loads signed-session gate without requesting AI', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ authenticated: false }) })
+    render(<App />)
+    expect(await screen.findByLabelText('Demo access code')).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/session')
+  })
+  it('typing and inspecting evidence do not request AI; explicit click sends current text', async () => {
+    const user = userEvent.setup()
+    render(<Workspace onLock={() => {}} />)
+    expect(fetchMock).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText('Your Interpretation'), { target: { value: 'Perhaps explanation language is a barrier.' } })
+    await user.click(screen.getByText('Evidence & lesson context'))
+    expect(fetchMock).not.toHaveBeenCalled()
+    modelResponse(challenge)
+    await user.click(screen.getByRole('button', { name: 'Challenge my interpretation' }))
+    expect(await screen.findByRole('button', { name: 'Accept suggestion' })).toBeTruthy()
+    const payload = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(payload.educatorInterpretation).toBe('Perhaps explanation language is a barrier.')
+    expect(payload.sourceIds).toHaveLength(4)
+    expect(Object.keys(payload).sort()).toEqual(['action', 'educatorInterpretation', 'requestId', 'sourceIds'])
+  })
+  it('keyboard Reject preserves work, refinement Reject preserves question, activity Reject preserves custom activity', async () => {
+    const user = userEvent.setup()
+    render(<Workspace onLock={() => {}} />)
+    modelResponse(challenge)
+    await user.click(screen.getByRole('button', { name: 'Challenge my interpretation' }))
+    const reject = await screen.findByRole('button', { name: 'Reject suggestion' })
+    reject.focus()
+    await user.keyboard('{Enter}')
+    expect((screen.getByLabelText('Your Interpretation') as HTMLTextAreaElement).value).toBe(initialState.educatorInterpretation)
+    expect((screen.getByLabelText('Your PLC Question') as HTMLTextAreaElement).value).toBe(initialState.inquiryDraft)
+    modelResponse(refinement)
+    await user.click(screen.getByRole('button', { name: 'Suggest a stronger PLC question' }))
+    await user.click(await screen.findByRole('button', { name: 'Reject suggestion' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm inquiry →' }))
+    fireEvent.change(screen.getByLabelText('Activity preview'), { target: { value: 'My custom rehearsal' } })
+    modelResponse(rehearsal)
+    await user.click(screen.getByRole('button', { name: 'Suggest a PLC activity' }))
+    await user.click(await screen.findByRole('button', { name: 'Reject suggestion' }))
+    expect((screen.getByLabelText('Activity preview') as HTMLTextAreaElement).value).toBe('My custom rehearsal')
+    const activityPayload = JSON.parse(fetchMock.mock.calls[2][1].body)
+    expect(activityPayload.confirmedInquiry).toBe(initialState.inquiryDraft)
+    expect(JSON.stringify(activityPayload)).not.toContain('Students may understand')
+  })
+  it('accepts all three into editable artifacts; requires confirmations; visibly marks Needs review', async () => {
+    const user = userEvent.setup()
+    render(<Workspace onLock={() => {}} />)
+    modelResponse(challenge)
+    await user.click(screen.getByRole('button', { name: 'Challenge my interpretation' }))
+    await user.click(await screen.findByRole('button', { name: 'Accept suggestion' }))
+    expect((screen.getByLabelText('Your PLC Question') as HTMLTextAreaElement).value).toBe(challenge.action === 'challenge' && challenge.suggestedInquiry)
+    expect(screen.queryByRole('button', { name: 'Suggest a PLC activity' })).toBeNull()
+    modelResponse(refinement)
+    await user.click(screen.getByRole('button', { name: 'Suggest a stronger PLC question' }))
+    await user.click(await screen.findByRole('button', { name: 'Accept suggestion' }))
+    expect(screen.queryByText('EDUCATOR CONFIRMED · REQUEST CONTEXT')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Confirm inquiry →' }))
+    modelResponse(rehearsal)
+    await user.click(screen.getByRole('button', { name: 'Suggest a PLC activity' }))
+    await user.click(await screen.findByRole('button', { name: 'Accept suggestion' }))
+    expect((screen.getByLabelText('Activity preview') as HTMLTextAreaElement).value).toContain('Rehearse an area-model explanation')
+    await user.click(screen.getByRole('button', { name: 'Confirm activity' }))
+    await user.click(screen.getByRole('button', { name: /Refine/ }))
+    fireEvent.change(screen.getByLabelText('Your PLC Question'), { target: { value: 'How do students identify a hundredth?' } })
+    await user.click(screen.getByRole('button', { name: 'Confirm inquiry →' }))
+    expect(screen.getByText('Needs review')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Confirm activity' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+  it.each([429, 502, 503, 504])('preserves educator text on server error %s', async (status) => {
+    fetchMock.mockResolvedValue({ ok: false, status, json: async () => ({ error: 'Please retry the request.' }) })
+    render(<Workspace onLock={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Challenge my interpretation' }))
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    expect((screen.getByLabelText('Your Interpretation') as HTMLTextAreaElement).value).toBe(initialState.educatorInterpretation)
+    expect(screen.queryByRole('button', { name: 'Accept suggestion' })).toBeNull()
+  })
+  it('handles network failure honestly without scripted suggestion', async () => {
+    fetchMock.mockRejectedValue(new TypeError('Unable to connect. Please retry.'))
+    render(<Workspace onLock={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Challenge my interpretation' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('Unable to connect')
+    expect(screen.queryByRole('button', { name: 'Accept suggestion' })).toBeNull()
+  })
+  it('does not render fabricated model sources as valid citations', async () => {
+    modelResponse({ ...challenge, sourceIds: ['invented-source'] })
+    render(<Workspace onLock={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Challenge my interpretation' }))
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    expect(screen.queryByRole('link', { name: /invented-source/ })).toBeNull()
+  })
+  it('cancellation keeps inputs and ignores late responses', async () => {
+    let finish: ((value: unknown) => void) | undefined
+    fetchMock.mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+    render(<Workspace onLock={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Challenge my interpretation' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel request' }))
+    expect(screen.getByRole('alert').textContent).toContain('cancelled')
+    finish?.({ ok: true, json: async () => ({ id: crypto.randomUUID(), requestId: JSON.parse(fetchMock.mock.calls[0][1].body).requestId, suggestion: challenge }) })
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Accept suggestion' })).toBeNull())
+  })
+})
