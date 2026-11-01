@@ -5,7 +5,7 @@ import { formatActivity, initialState, reducer, requestFor } from './features/ai
 import './App.css'
 
 const actionNames: Record<CoachAction, string> = {
-  challenge: 'AI Challenge', refine_inquiry: 'Question refinement', suggest_activity: 'Suggested Rehearsal',
+  challenge: 'Interpretation feedback', refine_inquiry: 'Question refinement', suggest_activity: 'Rehearsal suggestion',
 }
 
 function Sources({ ids }: { ids: string[] }) {
@@ -88,9 +88,9 @@ function Gate({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [busy, setBusy] = useState(false)
   return <main className="gate">
     <section className="gate-card" aria-labelledby="gate-title">
-      <p className="eyebrow">VALUE ADD OF TECHNOLOGY ON TEACHING (VATT)</p>
-      <h1 id="gate-title">AI supports educator thinking.</h1>
-      <p>A focused demo of the AI–educator interaction. The educator stays in charge.</p>
+      <p className="eyebrow">Inquiry / Prototype</p>
+      <h1 id="gate-title">AI Coaching Workspace</h1>
+      <p>Review evidence, draft an inquiry, and plan a rehearsal. AI suggestions are optional.</p>
       <form onSubmit={async (event) => {
         event.preventDefault()
         setBusy(true); setError('')
@@ -178,9 +178,8 @@ export function Workspace({ onLock }: { onLock: () => void }) {
 
   return <>
     <header className="topbar">
-      <a className="brand" href="#workspace"><span className="brand-mark" aria-hidden="true">i</span>Inquiry</a>
-      <span className="tagline">VATT demo · AI supports educator judgment.</span>
-      <div className="header-actions"><span className="fictional-label">AI integration demo · Fictional data</span>
+      <a className="brand" href="#workspace">Inquiry <span>Prototype</span></a>
+      <div className="header-actions"><span className="fictional-label">Fictional Grade 5 data</span>
         <button className="text-button" onClick={() => {
           if (window.confirm('Clear your drafts and decisions for a fresh demonstration?')) {
             controller.current?.abort(); dispatch({ type: 'reset' })
@@ -203,9 +202,9 @@ export function Workspace({ onLock }: { onLock: () => void }) {
       </div>
     </header>
     <main id="workspace" className="workspace">
-      <div className="workspace-heading"><p className="eyebrow">VALUE ADD OF TECHNOLOGY ON TEACHING (VATT)</p>
-        <h1>AI as a thinking partner</h1>
-        <p>A focused demo of AI interactions that help an educator examine evidence, shape an inquiry, and plan a rehearsal—while the educator decides.</p></div>
+      <div className="workspace-heading">
+        <h1>AI Coaching Workspace</h1>
+        <p>Examine evidence, shape an inquiry, and plan a rehearsal. You decide what to keep.</p></div>
       <div className="workspace-grid">
         <EvidenceRail />
         <section className="educator-panel" aria-label="Educator workspace">
@@ -217,7 +216,7 @@ export function Workspace({ onLock }: { onLock: () => void }) {
               onClick={() => navigate((index + 1) as 1 | 2 | 3)}><span>{index + 1}</span>{name}</button>)}</nav>
           <div className="editor-content">
             <span className="status-label">Educator draft</span>
-            <h2>{state.step === 1 ? 'Start with your thinking.' : state.step === 2 ? 'Make the question yours.' : 'Bring reasoning into practice.'}</h2>
+            <h2>{state.step === 1 ? 'Interpret the evidence' : state.step === 2 ? 'Draft an inquiry' : 'Plan a rehearsal'}</h2>
             <p className="section-intro">{state.step === 1 ? 'What might the student work be telling us? Hold your interpretation as a hypothesis, not a finding.'
               : state.step === 2 ? 'Refine or keep your question. Only your separate confirmation makes it authoritative.'
                 : 'Rehearse one mathematical idea in 15 minutes. The PLC still decides its classroom strategy.'}</p>
@@ -235,10 +234,9 @@ export function Workspace({ onLock }: { onLock: () => void }) {
               {inquiryChanged && <p className="notice">Unconfirmed edits. Confirm your changed inquiry before requesting a rehearsal.</p>}
             </>}
             <div className="request-area">
-              <span className="eyebrow">AN INVITATION TO THINK DIFFERENTLY</span>
               <button className="primary" onClick={requestSuggestion} disabled={busy || !!state.pending ||
                 (state.step === 1 ? !state.educatorInterpretation.trim() : state.step === 2 ? !state.inquiryDraft.trim() : !state.confirmedInquiry || inquiryChanged)}>
-                <span aria-hidden="true">✧</span> {state.step === 1 ? state.challengeDecided ? 'Try another challenge' : 'Challenge my interpretation'
+                {state.step === 1 ? state.challengeDecided ? 'Try another challenge' : 'Challenge my interpretation'
                   : state.step === 2 ? 'Suggest a stronger PLC question' : 'Suggest a PLC activity'}
               </button>
               <p className="field-note">AI runs only when you ask. Accepting copies a suggestion into a draft.</p>
@@ -269,9 +267,9 @@ export function Workspace({ onLock }: { onLock: () => void }) {
         </section>
         <aside className="ai-column" aria-label="AI suggestions and your decisions">
           <section className={`suggestion-panel ${state.pending ? 'has-suggestion' : ''}`} ref={feedback} tabIndex={-1} aria-labelledby="suggestion-title" aria-busy={busy}>
-            <div className="ai-panel-heading"><span className="ai-icon" aria-hidden="true">✧</span><div><span className="eyebrow">AI SUGGESTION</span>
+            <div className="ai-panel-heading"><div><span className="eyebrow">AI suggestion / Not confirmed</span>
               <h2 id="suggestion-title">{actionNames[currentAction]}</h2></div></div>
-            {busy ? <div className="empty-state" role="status"><span className="thinking-icon" aria-hidden="true">✧</span>
+            {busy ? <div className="empty-state" role="status">
               <h3>Considering the evidence…</h3><p>Your work stays in place while the suggestion is prepared.</p></div>
               : state.pending ? <>
                 <SuggestionContent suggestion={state.pending.suggestion} />
@@ -282,15 +280,15 @@ export function Workspace({ onLock }: { onLock: () => void }) {
                   <button className="primary" onClick={() => dispatch({ type: 'decide', choice: 'accepted', at: new Date().toISOString() })}>Accept suggestion</button>
                   <button className="secondary" onClick={() => dispatch({ type: 'decide', choice: 'rejected', at: new Date().toISOString() })}>Reject suggestion</button>
                 </div><p className="field-note">Accept → editable draft. Reject → your work stays unchanged.</p>
-              </> : <div className="empty-state"><span className="thinking-icon" aria-hidden="true">✧</span>
-                <h3>{state.decisions.length ? 'Your decision leads.' : 'A second perspective, when you want one.'}</h3>
-                <p>{state.decisions.length ? 'Continue with your wording, or request a fresh suggestion. Nothing is confirmed automatically.'
-                  : 'Request a suggestion for this step. Inspect its evidence and limits, then decide what to keep.'}</p></div>}
+              </> : <div className="empty-state">
+                <h3>No suggestion to review</h3>
+                <p>{state.decisions.length ? 'Continue with your draft or request another suggestion. Confirmation is a separate action.'
+                  : 'Use the request button to get feedback on your draft. Review sources and limits before accepting or rejecting.'}</p></div>}
             {state.error && <p className="error" role="alert">{state.error}</p>}
           </section>
           <section className="decision-trail" aria-label="Decision trail" aria-live="polite">
             <h2>Your decision trail <span>{state.decisions.length}</span></h2>
-            {!state.decisions.length ? <p>Suggestions inform.<br />You decide what moves forward.</p> :
+            {!state.decisions.length ? <p>No decisions yet. Accepted and rejected suggestions will appear here.</p> :
               [...state.decisions].reverse().map((decision) => <details key={decision.id} className="decision-record">
                 <summary><span>{actionNames[decision.suggestion.action]}</span><b>{decision.choice}</b></summary>
                 <time dateTime={decision.at}>{new Date(decision.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
