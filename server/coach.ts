@@ -20,8 +20,17 @@ For challenge, distinguish documented evidence from speculation. Explain which s
 For refine_inquiry, use only the educator-confirmed interpretation and current educator-authored inquiry draft as context. Return exactly one focused question about mathematical reasoning in suggestedInquiry. Never use unaccepted suggestions or prior request history. Preserve the educator's inquiry intent without prescribing an intervention or making causal claims.
 For suggest_activity, return exactly one realistic 15-minute teacher rehearsal aligned to the learning goal, not a whole meeting plan. Use only confirmedInquiry as the educator context, together with the provided sources and learning goal; do not assume earlier drafts, interpretations, or team decisions. Include an objective, a concrete activity using decimal multiplication and place-value models, exactly two mathematical discussion prompts, one anticipated student misconception, what teachers should practice, and what student evidence could be examined afterward. Rehearsal segments must total exactly 15 minutes. Do not present a finalized team strategy.`;
 
-const INVALID_RESPONSE = 'The coach returned an invalid response. Your work is unchanged; please retry.'
-const MODEL_UNAVAILABLE = 'The coach provider could not produce a valid response. Your work is unchanged; please retry. If this continues, ask the project owner to check the provider configuration in Vercel project environment settings.'
+const RESPONSE_FAILURES = {
+  incomplete: 'Gemini did not finish the response normally.',
+  empty: 'Gemini returned no response text.',
+  json: 'Gemini returned malformed JSON.',
+  validation: 'Gemini returned a response that failed the coach validation checks.',
+}
+
+function invalidResponse(action: CoachRequest['action'], reason: keyof typeof RESPONSE_FAILURES) {
+  console.error('Gemini coach response rejected', { action, reason })
+  return new HttpError(502, `${RESPONSE_FAILURES[reason]} Your work is unchanged; please retry. If this continues, ask the project owner to review the model and structured-output configuration.`)
+}
 
 function providerSchema(schema: typeof challengeSchema | typeof refineSchema | typeof activitySchema) {
   const jsonSchema = z.toJSONSchema(schema, { target: 'draft-7' })
@@ -73,7 +82,7 @@ export async function generateSuggestion(request: CoachRequest) {
         maxOutputTokens: 2200,
       },
     })
-    if (response.candidates?.[0]?.finishReason !== 'STOP') throw new HttpError(502, INVALID_RESPONSE)
+    if (response.candidates?.[0]?.finishReason !== 'STOP') throw invalidResponse(request.action, 'incomplete')
     text = response.text
   } catch (error) {
     if (error instanceof HttpError) throw error
@@ -92,25 +101,27 @@ export async function generateSuggestion(request: CoachRequest) {
       if (error.status >= 500 && error.status <= 599) {
         throw new HttpError(502, 'Gemini is temporarily unable to process the request. Your work is unchanged; please retry later.')
       }
-      throw new HttpError(502, MODEL_UNAVAILABLE)
+      throw new HttpError(502, `Gemini rejected the request (HTTP ${error.status}). Your work is unchanged; please retry. If this continues, ask the project owner to check the provider configuration in Vercel project environment settings.`)
     }
     if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
+      console.error('Gemini coach request failed', { action: request.action, reason: 'timeout' })
       throw new HttpError(504, 'The coach provider timed out. Your work is unchanged; please retry.')
     }
+    console.error('Gemini coach request failed', { action: request.action, reason: 'sdk_or_connection' })
     throw new HttpError(502, 'The coach provider could not be reached. Your work is unchanged; please retry.')
   }
+  if (!text) throw invalidResponse(request.action, 'empty')
   let output: unknown
   try {
-    if (!text) throw new Error('Empty structured response')
     output = JSON.parse(text)
   } catch {
-    throw new HttpError(502, INVALID_RESPONSE)
+    throw invalidResponse(request.action, 'json')
   }
   const parsed = suggestionSchema.safeParse(output)
   if (!parsed.success || parsed.data.action !== request.action ||
     new Set(parsed.data.sourceIds).size !== parsed.data.sourceIds.length ||
     parsed.data.sourceIds.some((id) => !request.sourceIds.includes(id) || !sources.some((source) => source.id === id))) {
-    throw new HttpError(502, INVALID_RESPONSE)
+    throw invalidResponse(request.action, 'validation')
   }
   return parsed.data
 }

@@ -338,8 +338,12 @@ describe('coach API', () => {
     { ...challenge, extra: 'invalid' },
   ])('rejects invalid output and unrequested or duplicate model citations %j', async (output) => {
     const cookie = await login()
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     generateContentMock.mockResolvedValueOnce(providerResponse(output))
-    expect((await call(coach, { cookie, body: request() })).status).toBe(502)
+    const result = await call(coach, { cookie, body: request() })
+    expect(result.status).toBe(502)
+    expect(result.data).toEqual({ error: expect.stringContaining('failed the coach validation checks') })
+    expect(log).toHaveBeenCalledExactlyOnceWith('Gemini coach response rejected', { action: 'challenge', reason: 'validation' })
   })
   it('rejects incorrect rehearsal totals and unsafe representations', async () => {
     const cookie = await login()
@@ -352,14 +356,22 @@ describe('coach API', () => {
       expect((await call(coach, { cookie, body: { action: 'suggest_activity', confirmedInquiry: 'Rehearse reasoning.', sourceIds: ['assessment-2026-10-28'], requestId } })).status).toBe(502)
     }
   })
-  it('rejects incomplete or refused provider responses without fallback', async () => {
+  it.each([
+    { response: providerResponse(challenge, 'MAX_TOKENS'), reason: 'incomplete', message: 'did not finish the response normally' },
+    { response: providerResponse(challenge, 'SAFETY'), reason: 'incomplete', message: 'did not finish the response normally' },
+    { response: { text: undefined, candidates: [{ finishReason: 'STOP' }] }, reason: 'empty', message: 'returned no response text' },
+    { response: { text: '{sensitive invalid json', candidates: [{ finishReason: 'STOP' }] }, reason: 'json', message: 'returned malformed JSON' },
+  ])('explains $reason responses without exposing provider content or using fallback', async ({ response, reason, message }) => {
     const cookie = await login()
-    for (const response of [providerResponse(challenge, 'MAX_TOKENS'), { text: undefined, candidates: [{ finishReason: 'STOP' }] }]) {
-      generateContentMock.mockResolvedValueOnce(response)
-      expect((await call(coach, { cookie, body: request() })).status).toBe(502)
-    }
-    generateContentMock.mockResolvedValueOnce({ text: '{invalid json', candidates: [{ finishReason: 'STOP' }] })
-    expect((await call(coach, { cookie, body: request() })).status).toBe(502)
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    generateContentMock.mockResolvedValueOnce(response)
+    const result = await call(coach, { cookie, body: request() })
+    expect(result.status).toBe(502)
+    expect(result.data).toEqual({ error: expect.stringContaining(message) })
+    expect(result.data).toEqual({ error: expect.stringContaining('Your work is unchanged') })
+    expect(JSON.stringify(result.data)).not.toContain('sensitive')
+    expect(result.data).not.toHaveProperty('suggestion')
+    expect(log).toHaveBeenCalledExactlyOnceWith('Gemini coach response rejected', { action: 'challenge', reason })
   })
   it('fails honestly without a configured provider key and never invokes it', async () => {
     const cookie = await login()
@@ -382,7 +394,8 @@ describe('coach API', () => {
     [404, 'The configured Gemini model was not found or is unavailable'],
     [500, 'Gemini is temporarily unable to process the request'],
     [503, 'Gemini is temporarily unable to process the request'],
-    [422, 'The coach provider could not produce a valid response'],
+    [422, 'Gemini rejected the request (HTTP 422)'],
+    [502, 'Gemini is temporarily unable to process the request'],
   ])('explains provider HTTP %i without exposing provider details or educator text', async (status, message) => {
     const cookie = await login()
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -398,7 +411,7 @@ describe('coach API', () => {
   })
   it('sanitizes rate-limit, timeout, connection, SDK parse and unexpected errors', async () => {
     const cookie = await login()
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const cases = [
       { error: new ApiError({ status: 429, message: 'sensitive detail' }), status: 429 },
       { error: Object.assign(new Error('sensitive detail'), { name: 'TimeoutError' }), status: 504 },
@@ -414,5 +427,8 @@ describe('coach API', () => {
       expect(result.data).toEqual({ error: expect.stringContaining('Your work is unchanged; please retry') })
       expect(result.data).not.toHaveProperty('suggestion')
     }
+    expect(log).toHaveBeenCalledWith('Gemini coach request failed', { action: 'challenge', reason: 'timeout' })
+    expect(log).toHaveBeenCalledWith('Gemini coach request failed', { action: 'challenge', reason: 'sdk_or_connection' })
+    expect(JSON.stringify(log.mock.calls)).not.toContain('sensitive detail')
   })
 })
