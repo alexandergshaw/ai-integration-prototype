@@ -101,7 +101,10 @@ beforeEach(() => {
   options.length = 0
   generateContentMock.mockResolvedValue(providerResponse(challenge))
 })
-afterEach(() => vi.unstubAllEnvs())
+afterEach(() => {
+  vi.unstubAllEnvs()
+  vi.restoreAllMocks()
+})
 
 describe('session API', () => {
   it('exposes only authentication status and issues a 2-hour strict HttpOnly production cookie', async () => {
@@ -346,8 +349,36 @@ describe('coach API', () => {
     expect(result.data).toEqual({ error: expect.stringContaining('project owner to set GEMINI_API_KEY in Vercel project environment settings') })
     expect(generateContentMock).not.toHaveBeenCalled()
   })
+  it('trims surrounding whitespace from the server-only API key', async () => {
+    const cookie = await login()
+    vi.stubEnv('GEMINI_API_KEY', '  test-key \n')
+    expect((await call(coach, { cookie, body: request() })).status).toBe(200)
+    expect(options[0]).toMatchObject({ apiKey: 'test-key' })
+  })
+  it.each([
+    [400, 'Gemini rejected the request (HTTP 400)'],
+    [401, 'Gemini rejected authentication or denied access'],
+    [403, 'Gemini rejected authentication or denied access'],
+    [404, 'The configured Gemini model was not found or is unavailable'],
+    [500, 'Gemini is temporarily unable to process the request'],
+    [503, 'Gemini is temporarily unable to process the request'],
+    [422, 'The coach provider could not produce a valid response'],
+  ])('explains provider HTTP %i without exposing provider details or educator text', async (status, message) => {
+    const cookie = await login()
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    generateContentMock.mockRejectedValueOnce(new ApiError({ status, message: 'sensitive provider detail test-key' }))
+    const result = await call(coach, { cookie, body: request() })
+    expect(result.status).toBe(502)
+    expect(result.data).toEqual({ error: expect.stringContaining(message) })
+    expect(result.data).toEqual({ error: expect.stringContaining('Your work is unchanged') })
+    expect(JSON.stringify(result.data)).not.toContain('sensitive provider detail')
+    expect(JSON.stringify(result.data)).not.toContain('test-key')
+    expect(result.data).not.toHaveProperty('suggestion')
+    expect(log).toHaveBeenCalledExactlyOnceWith('Gemini coach request failed', { status, action: 'challenge' })
+  })
   it('sanitizes rate-limit, timeout, connection, SDK parse and unexpected errors', async () => {
     const cookie = await login()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
     const cases = [
       { error: new ApiError({ status: 429, message: 'sensitive detail' }), status: 429 },
       { error: Object.assign(new Error('sensitive detail'), { name: 'TimeoutError' }), status: 504 },

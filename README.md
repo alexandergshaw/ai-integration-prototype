@@ -34,6 +34,12 @@ AI runs only on a button click. Errors never replace educator work with a script
 
 **Secrets are separate:** Copilot agent secrets support cloud development; GitHub Actions secrets support CI; Vercel Environment Variables supply the deployed API's runtime. Adding a secret to one does not configure the others. This CI needs no model credentials.
 
+### Troubleshooting Gemini
+
+Gemini request failures do not change your drafts. Authentication/access errors mean you should check `GEMINI_API_KEY` and the associated Google AI Studio project's permissions; model-not-found errors mean you should check `GEMINI_MODEL` and that project's model access. HTTP 400 means Gemini rejected the request: check the key, model, and structured-output configuration rather than assuming the output was invalid. Rate limits can reflect quota exhaustion; temporary provider failures can be retried later.
+
+In **Vercel → Project → Logs**, filter for `/api/coach` and `Gemini coach request failed`. The app logs only the provider HTTP status and action, never the raw provider error, API key, or educator text. Check variables for the failing deployment environment and redeploy after any changes. Do not share credentials when troubleshooting.
+
 ## Trust and cost boundaries
 
 - `shared/evidence.ts` contains only fictional Grade 5 evidence. Dates, scope, visibility, exact counts, and hypothetical rubric labels are shown in the persistent rail (a disclosure on mobile).
