@@ -2,7 +2,7 @@
 
 ## One decision workspace
 
-A chatbot approach gets several things right: educator-authored language, quick iteration, and space for a probing second perspective. For this task, a chat transcript alone makes evidence, source limitations, draft ownership, and acceptance ambiguous. InquiryLoop keeps a compact evidence rail next to educator text and a contextual suggestion card. One explicit decision updates one editable artifact.
+A chatbot approach gets several things right: educator-authored language, quick iteration, and space for a probing second perspective. For this task, a chat transcript alone makes evidence, source limitations, draft ownership, and acceptance ambiguous. Inquiry keeps a compact evidence rail next to educator text and a contextual suggestion card. One explicit decision updates one editable artifact.
 
 This vertical slice is enough for an interview: it demonstrates three real model integrations, human authorship, rejection, confirmation, and downstream invalidation without diluting those moments across an entire PLC planner.
 

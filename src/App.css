@@ -1,6 +1,6 @@
 .topbar { min-height: 80px; padding: 18px 3.2%; display: flex; align-items: center; gap: 24px; background: #fff; border-bottom: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 9px; text-decoration: none; color: var(--navy); font-size: 24px; font-weight: 750; letter-spacing: -1px; }
-.brand-mark { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 12px; background: var(--teal); color: #fff; font-size: 30px; }
+.brand-mark { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: #e8f4ef; color: var(--teal); font-size: 20px; font-weight: 700; line-height: 1; }
 .tagline { font-size: 12px; color: var(--muted); }
 .header-actions { margin-left: auto; display: flex; align-items: center; gap: 15px; }
 .fictional-label { font-size: 10px; border: 1px solid #dbe5e7; background: #f5f8f8; border-radius: 20px; padding: 6px 10px; }

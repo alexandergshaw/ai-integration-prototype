@@ -1,4 +1,4 @@
-# InquiryLoop contribution boundaries
+# Inquiry contribution boundaries
 
 - Maintain one AI Coaching Workspace, not a complete PLC application.
 - Use only fictional, de-identified Grade 5 decimal-multiplication fixtures. Keep source IDs, dates, scope, rubric context, and visibility explicit. Never infer overlap between the two assessment metrics or assert causality.

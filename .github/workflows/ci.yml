@@ -1,4 +1,4 @@
-name: InquiryLoop checks
+name: Inquiry checks
 
 on:
   push:

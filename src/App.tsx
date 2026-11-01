@@ -174,7 +174,7 @@ export function Workspace({ onLock }: { onLock: () => void }) {
 
   return <>
     <header className="topbar">
-      <a className="brand" href="#workspace"><span className="brand-mark" aria-hidden="true">↻</span>InquiryLoop</a>
+      <a className="brand" href="#workspace"><span className="brand-mark" aria-hidden="true">i</span>Inquiry</a>
       <span className="tagline">AI challenges the reasoning; educators own the decision.</span>
       <div className="header-actions"><span className="fictional-label">Fictional assessment data</span>
         <button className="text-button" onClick={() => {
@@ -309,6 +309,6 @@ export default function App() {
     }).catch(() => { if (!abort.signal.aborted) setSession('locked') })
     return () => abort.abort()
   }, [])
-  if (session === 'checking') return <main className="gate" role="status">Opening InquiryLoop…</main>
+  if (session === 'checking') return <main className="gate" role="status">Opening Inquiry…</main>
   return session === 'locked' ? <Gate onAuthenticated={() => setSession('open')} /> : <Workspace onLock={() => setSession('locked')} />
 }

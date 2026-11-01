@@ -1,4 +1,4 @@
-# InquiryLoop: a three-minute walkthrough
+# Inquiry: a three-minute walkthrough
 
 Before the interview, deploy via the README, enter the demo code, and verify the live provider. Use only fictional input. Leave room for provider latency; never describe a failed or mocked call as live success.
 
