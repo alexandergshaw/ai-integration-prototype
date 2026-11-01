@@ -10,6 +10,9 @@ import { evidence, learningGoal } from '../shared/evidence.ts'
 import { coachResponseSchema } from '../shared/schemas.ts'
 import { COOKIE_NAME, SESSION_SECONDS } from '../server/session.ts'
 import type { Request } from '../server/http.ts'
+import { failure as respondFailure } from '../server/http.ts'
+import { classifyResponse } from '../src/features/ai-decision/failure'
+import { initialState, reducer } from '../src/features/ai-decision/state'
 
 const { generateContentMock, options } = vi.hoisted(() => ({
   generateContentMock: vi.fn(), options: [] as unknown[],
@@ -227,6 +230,34 @@ describe('request boundary', () => {
 })
 
 describe('coach API', () => {
+  it('classifies an unhandled platform error safely without exposing its contents', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const result = await call(async (_req, res) => {
+      respondFailure(res, new Error('private educator content and credential'))
+    })
+    expect(result.status).toBe(500)
+    expect(result.data).toEqual({ error: 'The request could not be completed.', category: 'platform_failure' })
+    expect(classifyResponse(result.status, result.data)).toEqual({ kind: 'recoverable' })
+    expect(log).toHaveBeenCalledExactlyOnceWith('Request failure', { category: 'platform_failure' })
+    expect(JSON.stringify(result.data)).not.toContain('private')
+  })
+  it('routes actual upstream HTTP 400 through the API category into guidance without changing educator work', async () => {
+    const cookie = await login()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    generateContentMock.mockRejectedValueOnce(new ApiError({ status: 400, message: 'private upstream detail' }))
+    const result = await call(coach, { cookie, body: request() })
+    expect(result.status).toBe(502)
+    const failure = classifyResponse(result.status, result.data)
+    expect(failure.kind).toBe('recoverable')
+    const started = reducer(initialState, { type: 'start', id: requestId, action: 'challenge' })
+    const next = reducer(started, { type: 'error', requestId, message: '', eligible: failure.kind === 'recoverable' })
+    expect(next.guide).toBe(true)
+    expect(next.error).toBe('')
+    expect(next.pending).toBeNull()
+    expect(next.educatorInterpretation).toBe(initialState.educatorInterpretation)
+    expect(next.inquiryDraft).toBe(initialState.inquiryDraft)
+    expect(next.decisions).toEqual([])
+  })
   it('keeps session, same-origin, invalid source/request, and session-configuration failures ineligible', async () => {
     const cookie = await login()
     const failures = [

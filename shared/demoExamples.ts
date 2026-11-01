@@ -1,5 +1,14 @@
 import { suggestionSchema, type CoachAction, type Suggestion } from './schemas'
-import { sourceIds } from './evidence'
+import { sourceIds, workspaceScenario } from './evidence'
+
+export type ExampleScenario = { id: string; grade: number; topic: string; sourceIds: readonly string[] }
+
+export function matchesExampleScenario(scenario: ExampleScenario | null, authorizedIds: readonly string[]) {
+  return scenario?.id === workspaceScenario.id && scenario.grade === 5 &&
+    scenario.topic === 'decimal-multiplication' &&
+    scenario.sourceIds.length === sourceIds.length && sourceIds.every((id) =>
+      scenario.sourceIds.includes(id) && authorizedIds.includes(id))
+}
 
 export const demoScenario: Record<CoachAction, string> = {
   challenge: 'Prepared for an interpretation that correct products may reflect decimal-placement procedures rather than place-value reasoning.',
