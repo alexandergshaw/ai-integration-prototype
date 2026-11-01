@@ -87,34 +87,35 @@ function Gate({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   return <main className="gate">
-    <div className="brand-mark" aria-hidden="true">↻</div>
-    <p className="eyebrow">INQUIRYLOOP</p>
-    <h1>AI challenges the reasoning.<br />Educators own the decision.</h1>
-    <p>Enter your demo access code to open the AI Coaching Workspace.</p>
-    <form onSubmit={async (event) => {
-      event.preventDefault()
-      setBusy(true); setError('')
-      try {
-        const response = await fetch('/api/session', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code }), signal: AbortSignal.timeout(10000),
-        })
-        if (!response.ok) {
-          const body = await response.json()
-          throw new Error(body.error || 'Unable to unlock the workspace. Please try again.')
-        }
-        setCode(''); onAuthenticated()
-      } catch (cause) {
-        setError(cause instanceof Error && cause.name !== 'TimeoutError' ? cause.message : 'Connection timed out. Please try again.')
-      } finally { setBusy(false) }
-    }}>
-      <label htmlFor="demo-code">Demo access code</label>
-      <input id="demo-code" type="password" autoComplete="current-password" maxLength={200} value={code}
-        onChange={(event) => setCode(event.target.value)} required />
-      <button className="primary" disabled={busy || !code.trim()}>{busy ? 'Opening workspace…' : 'Open workspace →'}</button>
-      {error && <p role="alert" className="error">{error}</p>}
-    </form>
-    <small>Personal interview prototype · Fictional assessment data<br />Not a Leading Educators product or endorsement.</small>
+    <section className="gate-card" aria-labelledby="gate-title">
+      <p className="eyebrow">VALUE ADD OF TECHNOLOGY ON TEACHING (VATT)</p>
+      <h1 id="gate-title">AI supports educator thinking.</h1>
+      <p>A focused demo of the AI–educator interaction. The educator stays in charge.</p>
+      <form onSubmit={async (event) => {
+        event.preventDefault()
+        setBusy(true); setError('')
+        try {
+          const response = await fetch('/api/session', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code }), signal: AbortSignal.timeout(10000),
+          })
+          if (!response.ok) {
+            const body = await response.json()
+            throw new Error(body.error || 'Unable to unlock the workspace. Please try again.')
+          }
+          setCode(''); onAuthenticated()
+        } catch (cause) {
+          setError(cause instanceof Error && cause.name !== 'TimeoutError' ? cause.message : 'Connection timed out. Please try again.')
+        } finally { setBusy(false) }
+      }}>
+        <label htmlFor="demo-code">Demo access code</label>
+        <input id="demo-code" type="password" autoComplete="current-password" maxLength={200} value={code}
+          onChange={(event) => setCode(event.target.value)} required />
+        <button className="primary" disabled={busy || !code.trim()}>{busy ? 'Opening workspace…' : 'Open workspace →'}</button>
+        {error && <p role="alert" className="error">{error}</p>}
+      </form>
+      <small>Fictional Grade 5 data · Session-only · Not a full PLC platform or a Leading Educators product or endorsement.</small>
+    </section>
   </main>
 }
 
@@ -178,8 +179,8 @@ export function Workspace({ onLock }: { onLock: () => void }) {
   return <>
     <header className="topbar">
       <a className="brand" href="#workspace"><span className="brand-mark" aria-hidden="true">i</span>Inquiry</a>
-      <span className="tagline">AI challenges the reasoning; educators own the decision.</span>
-      <div className="header-actions"><span className="fictional-label">Fictional assessment data</span>
+      <span className="tagline">VATT demo · AI supports educator judgment.</span>
+      <div className="header-actions"><span className="fictional-label">AI integration demo · Fictional data</span>
         <button className="text-button" onClick={() => {
           if (window.confirm('Clear your drafts and decisions for a fresh demonstration?')) {
             controller.current?.abort(); dispatch({ type: 'reset' })
@@ -202,8 +203,9 @@ export function Workspace({ onLock }: { onLock: () => void }) {
       </div>
     </header>
     <main id="workspace" className="workspace">
-      <div className="workspace-heading"><p className="eyebrow">A THINKING PARTNER, NOT A DECISION MAKER</p>
-        <h1>AI Coaching Workspace</h1><p>Move from an interpretation to an inquiry you can stand behind.</p></div>
+      <div className="workspace-heading"><p className="eyebrow">VALUE ADD OF TECHNOLOGY ON TEACHING (VATT)</p>
+        <h1>AI as a thinking partner</h1>
+        <p>A focused demo of AI interactions that help an educator examine evidence, shape an inquiry, and plan a rehearsal—while the educator decides.</p></div>
       <div className="workspace-grid">
         <EvidenceRail />
         <section className="educator-panel" aria-label="Educator workspace">
@@ -309,7 +311,7 @@ export function Workspace({ onLock }: { onLock: () => void }) {
           </section>
         </aside>
       </div>
-      <footer>Fictional, de-identified evidence · Session-only drafts · Personal interview prototype, not a Leading Educators product or endorsement.</footer>
+      <footer>AI integration demo · Fictional, de-identified evidence · Session-only drafts · The educator owns every decision · Not a Leading Educators product or endorsement.</footer>
     </main>
   </>
 }

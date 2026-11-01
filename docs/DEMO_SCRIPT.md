@@ -1,10 +1,12 @@
-# Inquiry: a three-minute walkthrough
+# Inquiry: a three-minute VATT demo
 
 Before the interview, deploy via the README, enter the demo code, and verify the live provider. Use only fictional input. Leave room for provider latency; never describe a failed or mocked call as live success.
 
+This is a focused demo of the Value Add of Technology on Teaching (VATT): AI offers a second perspective, while the educator remains the author and decision maker. It demonstrates an AI integration interaction, not a complete PLC application or evidence of teaching outcomes.
+
 ## 0:00–0:30 · Evidence and human authorship
 
-“AI challenges the reasoning; educators own the decision. This is a personal prototype with fictional data, not a Leading Educators product.”
+“This demonstrates VATT: AI can support educator thinking, but the educator owns the decision. The data is fictional.”
 
 Point to October 28, four classrooms, 96 responses: 68/96 correct products; 29/96 adequate explanations. These are separate hypothetical rubric measures, with unknown overlap. Show the area model and work-C's procedural wording.
 
