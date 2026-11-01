@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App, { Workspace } from '../src/App'
 import { initialState } from '../src/features/ai-decision/state'
@@ -18,7 +18,7 @@ beforeEach(() => {
   vi.stubGlobal('matchMedia', () => ({ matches: true }))
   fetchMock.mockReset()
 })
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('Workspace interaction and provider-idle boundaries', () => {
   it('loads signed-session gate without requesting AI', async () => {
@@ -155,5 +155,24 @@ describe('Workspace interaction and provider-idle boundaries', () => {
     expect(screen.getByRole('alert').textContent).toContain('cancelled')
     finish?.({ ok: true, json: async () => ({ id: crypto.randomUUID(), requestId: JSON.parse(fetchMock.mock.calls[0][1].body).requestId, suggestion: challenge }) })
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Accept suggestion' })).toBeNull())
+  })
+  it('keeps drafts and reports the 75-second browser deadline', async () => {
+    vi.useFakeTimers()
+    let signal: AbortSignal | undefined
+    fetchMock.mockImplementation((_url, options) => new Promise((_resolve, reject) => {
+      signal = options.signal
+      signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+    }))
+    render(<Workspace onLock={() => {}} />)
+    const interpretation = screen.getByLabelText('Your Interpretation') as HTMLTextAreaElement
+    fireEvent.change(interpretation, { target: { value: 'Keep my educator-authored interpretation.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Challenge my interpretation' }))
+    expect(signal?.aborted).toBe(false)
+    await act(async () => { await vi.advanceTimersByTimeAsync(74_999) })
+    expect(signal?.aborted).toBe(false)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(signal?.aborted).toBe(true)
+    expect(screen.getByRole('alert').textContent).toContain('request timed out')
+    expect(interpretation.value).toBe('Keep my educator-authored interpretation.')
   })
 })

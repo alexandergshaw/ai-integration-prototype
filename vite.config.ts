@@ -1,7 +1,9 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 
-const serverEnvironment = ['GEMINI_API_KEY', 'GEMINI_MODEL', 'DEMO_ACCESS_CODE', 'SESSION_SECRET'] as const
+const serverEnvironment = [
+  'GEMINI_API_KEY', 'Gemini_LLM_API_Key', 'GEMINI_MODEL', 'DEMO_ACCESS_CODE', 'SESSION_SECRET',
+] as const
 
 function localApi(): Plugin {
   return {

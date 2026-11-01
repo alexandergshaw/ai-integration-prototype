@@ -27,6 +27,20 @@ vi.mock('@google/genai', async (importOriginal) => {
     },
   }
 })
+it('uses the compatibility key alias only when the canonical key is blank', async () => {
+  const cookie = await login()
+  vi.stubEnv('GEMINI_API_KEY', ' ')
+  vi.stubEnv('Gemini_LLM_API_Key', '  reference-key \n')
+  expect((await call(coach, { cookie, body: request() })).status).toBe(200)
+  expect(options[0]).toMatchObject({ apiKey: 'reference-key' })
+})
+it('prefers the canonical key when both key names are configured', async () => {
+  const cookie = await login()
+  vi.stubEnv('GEMINI_API_KEY', ' canonical-key ')
+  vi.stubEnv('Gemini_LLM_API_Key', 'reference-key')
+  expect((await call(coach, { cookie, body: request() })).status).toBe(200)
+  expect(options[0]).toMatchObject({ apiKey: 'canonical-key' })
+})
 
 const code = 'a-strong-private-demo-access-code'
 const secret = 'a-strong-private-signing-secret-at-least-32-characters'
@@ -88,13 +102,18 @@ function request(overrides: Record<string, unknown> = {}) {
   return { action: 'challenge', educatorInterpretation: 'Students can calculate but may not explain.', sourceIds: ['assessment-2026-10-28'], requestId, ...overrides }
 }
 function providerResponse(output: unknown, finishReason = 'STOP') {
-  return { text: JSON.stringify(output), candidates: [{ finishReason }] }
+  return {
+    text: JSON.stringify(output),
+    candidates: [{ finishReason }],
+    usageMetadata: { promptTokenCount: 111, candidatesTokenCount: 222, totalTokenCount: 333 },
+  }
 }
 
 beforeEach(() => {
   vi.stubEnv('DEMO_ACCESS_CODE', code)
   vi.stubEnv('SESSION_SECRET', secret)
   vi.stubEnv('GEMINI_API_KEY', 'test-key')
+  vi.stubEnv('Gemini_LLM_API_Key', '')
   vi.stubEnv('GEMINI_MODEL', '')
   vi.stubEnv('NODE_ENV', 'test')
   generateContentMock.mockReset()
@@ -225,19 +244,20 @@ describe('coach API', () => {
     expect(result.data).toMatchObject({ requestId, suggestion: challenge })
     expect(options).toEqual([{
       apiKey: 'test-key',
-      httpOptions: { timeout: 25_000, retryOptions: { attempts: 1 } },
+      httpOptions: { timeout: 60_000, retryOptions: { attempts: 1 } },
     }])
     const args = generateContentMock.mock.calls[0]![0]
     expect(args).toMatchObject({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.5-flash',
       config: {
         responseMimeType: 'application/json',
-        maxOutputTokens: 2200,
+        maxOutputTokens: 8192,
+        thinkingConfig: { thinkingBudget: 0 },
         responseJsonSchema: { type: 'object', additionalProperties: false },
       },
     })
     expect(args.config.responseJsonSchema).not.toHaveProperty('$schema')
-    expect(args.config.responseJsonSchema.properties.evidenceConsideration).not.toHaveProperty('maxLength')
+    expect(args.config.responseJsonSchema.properties.evidenceConsideration).toMatchObject({ minLength: 1, maxLength: 1200 })
     expect(args.config.responseJsonSchema.properties.action).toEqual({ type: 'string', enum: ['challenge'] })
     expect(args.config.systemInstruction).toContain('overlap is unknown')
     expect(args.config.systemInstruction).toContain('explicitly tentative')
@@ -263,10 +283,12 @@ describe('coach API', () => {
       const payload = JSON.parse(generateContentMock.mock.lastCall![0].contents)
       const schema = generateContentMock.mock.lastCall![0].config.responseJsonSchema
       expect(schema.properties.action).toEqual({ type: 'string', enum: [item.body.action] })
+      expect(schema.properties.rationale).toMatchObject({ minLength: 1, maxLength: 1200 })
+      expect(schema.properties.sourceIds).toMatchObject({ minItems: 1, maxItems: 3 })
       const checkProviderSchema = (value: unknown) => {
         if (!value || typeof value !== 'object') return
         for (const [key, child] of Object.entries(value)) {
-          expect(['const', '$schema', 'minLength', 'maxLength']).not.toContain(key)
+          expect(['const', '$schema']).not.toContain(key)
           checkProviderSchema(child)
         }
       }
@@ -343,7 +365,11 @@ describe('coach API', () => {
     const result = await call(coach, { cookie, body: request() })
     expect(result.status).toBe(502)
     expect(result.data).toEqual({ error: expect.stringContaining('failed the coach validation checks') })
-    expect(log).toHaveBeenCalledExactlyOnceWith('Gemini coach response rejected', { action: 'challenge', reason: 'validation' })
+    expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({
+      requestId, action: 'challenge', model: 'gemini-2.5-flash', stage: 'validation',
+      category: expect.any(String), validationIssues: expect.any(Array),
+    }))
+    expect(JSON.stringify(log.mock.calls)).not.toContain('unknown')
   })
   it('rejects incorrect rehearsal totals and unsafe representations', async () => {
     const cookie = await login()
@@ -356,12 +382,49 @@ describe('coach API', () => {
       expect((await call(coach, { cookie, body: { action: 'suggest_activity', confirmedInquiry: 'Rehearse reasoning.', sourceIds: ['assessment-2026-10-28'], requestId } })).status).toBe(502)
     }
   })
+  it('rejects output that exceeds local field lengths and logs only safe paths and issue codes', async () => {
+    const cookie = await login()
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const invalid = { ...challenge, evidenceConsideration: 'x'.repeat(1201) }
+    generateContentMock.mockResolvedValueOnce(providerResponse(invalid))
+    const result = await call(coach, { cookie, body: request() })
+    expect(result.status).toBe(502)
+    expect(result.data).toEqual({ error: expect.stringContaining('failed the coach validation checks') })
+    expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({
+      requestId,
+      stage: 'validation',
+      category: 'local_validation',
+      usage: { promptTokenCount: 111, candidatesTokenCount: 222, totalTokenCount: 333 },
+      validationIssues: [{ code: 'too_big', path: ['evidenceConsideration'] }],
+    }))
+    expect(JSON.stringify(log.mock.calls)).not.toContain('x'.repeat(100))
+  })
+  it('distinguishes a missing candidate and safe prompt block reason', async () => {
+    const cookie = await login()
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    generateContentMock.mockResolvedValueOnce({
+      text: undefined,
+      candidates: [],
+      promptFeedback: { blockReason: 'SAFETY' },
+      usageMetadata: { totalTokenCount: 17 },
+    })
+    const result = await call(coach, { cookie, body: request() })
+    expect(result.status).toBe(502)
+    expect(result.data).toEqual({ error: expect.stringContaining('no candidate or blocked') })
+    expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({
+      requestId,
+      stage: 'response',
+      category: 'no_candidate_or_blocked',
+      blockReason: 'SAFETY',
+      usage: { totalTokenCount: 17 },
+    }))
+  })
   it.each([
-    { response: providerResponse(challenge, 'MAX_TOKENS'), reason: 'incomplete', message: 'did not finish the response normally' },
-    { response: providerResponse(challenge, 'SAFETY'), reason: 'incomplete', message: 'did not finish the response normally' },
-    { response: { text: undefined, candidates: [{ finishReason: 'STOP' }] }, reason: 'empty', message: 'returned no response text' },
-    { response: { text: '{sensitive invalid json', candidates: [{ finishReason: 'STOP' }] }, reason: 'json', message: 'returned malformed JSON' },
-  ])('explains $reason responses without exposing provider content or using fallback', async ({ response, reason, message }) => {
+    { response: providerResponse(challenge, 'MAX_TOKENS'), category: 'max_tokens', message: 'ran out of output space' },
+    { response: providerResponse(challenge, 'SAFETY'), category: 'incomplete_finish_reason', message: 'did not finish the response normally' },
+    { response: { text: undefined, candidates: [{ finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 111, candidatesTokenCount: 222, totalTokenCount: 333 } }, category: 'empty_text', message: 'returned no response text' },
+    { response: { text: '{sensitive invalid json', candidates: [{ finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 111, candidatesTokenCount: 222, totalTokenCount: 333 } }, category: 'invalid_json', message: 'returned malformed JSON' },
+  ])('explains $category responses without exposing provider content or using fallback', async ({ response, category, message }) => {
     const cookie = await login()
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     generateContentMock.mockResolvedValueOnce(response)
@@ -371,14 +434,18 @@ describe('coach API', () => {
     expect(result.data).toEqual({ error: expect.stringContaining('Your work is unchanged') })
     expect(JSON.stringify(result.data)).not.toContain('sensitive')
     expect(result.data).not.toHaveProperty('suggestion')
-    expect(log).toHaveBeenCalledExactlyOnceWith('Gemini coach response rejected', { action: 'challenge', reason })
+    expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({
+      requestId, action: 'challenge', model: 'gemini-2.5-flash',
+      stage: 'response', category, elapsedMs: expect.any(Number),
+      usage: { promptTokenCount: 111, candidatesTokenCount: 222, totalTokenCount: 333 },
+    }))
   })
   it('fails honestly without a configured provider key and never invokes it', async () => {
     const cookie = await login()
     vi.stubEnv('GEMINI_API_KEY', '')
     const result = await call(coach, { cookie, body: request() })
     expect(result.status).toBe(503)
-    expect(result.data).toEqual({ error: expect.stringContaining('project owner to set GEMINI_API_KEY in Vercel project environment settings') })
+    expect(result.data).toEqual({ error: expect.stringContaining('project owner to set GEMINI_API_KEY') })
     expect(generateContentMock).not.toHaveBeenCalled()
   })
   it('trims surrounding whitespace from the server-only API key', async () => {
@@ -407,7 +474,10 @@ describe('coach API', () => {
     expect(JSON.stringify(result.data)).not.toContain('sensitive provider detail')
     expect(JSON.stringify(result.data)).not.toContain('test-key')
     expect(result.data).not.toHaveProperty('suggestion')
-    expect(log).toHaveBeenCalledExactlyOnceWith('Gemini coach request failed', { status, action: 'challenge' })
+    expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({
+      requestId, providerStatus: status, action: 'challenge',
+      model: 'gemini-2.5-flash', stage: 'provider', category: 'http_rejection',
+    }))
   })
   it('sanitizes rate-limit, timeout, connection, SDK parse and unexpected errors', async () => {
     const cookie = await login()
@@ -427,8 +497,15 @@ describe('coach API', () => {
       expect(result.data).toEqual({ error: expect.stringContaining('Your work is unchanged; please retry') })
       expect(result.data).not.toHaveProperty('suggestion')
     }
-    expect(log).toHaveBeenCalledWith('Gemini coach request failed', { action: 'challenge', reason: 'timeout' })
-    expect(log).toHaveBeenCalledWith('Gemini coach request failed', { action: 'challenge', reason: 'sdk_or_connection' })
+    expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({
+      action: 'challenge', model: 'gemini-2.5-flash', stage: 'provider', category: 'timeout',
+    }))
+    expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({
+      action: 'challenge', model: 'gemini-2.5-flash', stage: 'provider', category: 'network_failure',
+    }))
+    expect(log).toHaveBeenCalledWith('Gemini coach failure', expect.objectContaining({
+      action: 'challenge', model: 'gemini-2.5-flash', stage: 'provider', category: 'sdk_response_parse_failure',
+    }))
     expect(JSON.stringify(log.mock.calls)).not.toContain('sensitive detail')
   })
 })

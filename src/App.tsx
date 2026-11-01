@@ -155,7 +155,7 @@ export function Workspace({ onLock }: { onLock: () => void }) {
     controller.current = abort
     const id = crypto.randomUUID()
     dispatch({ type: 'start', id, action: currentAction })
-    const timer = window.setTimeout(() => abort.abort('timeout'), 28000)
+    const timer = window.setTimeout(() => abort.abort('timeout'), 75000)
     try {
       const response = await fetch('/api/coach', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
