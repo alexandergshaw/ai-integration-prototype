@@ -5,9 +5,11 @@ export const MAX_BODY_BYTES = 12 * 1024
 
 export class HttpError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  category: 'application_failure' | 'provider_failure'
+  constructor(status: number, message: string, category: HttpError['category'] = 'application_failure') {
     super(message)
     this.status = status
+    this.category = category
   }
 }
 
@@ -26,8 +28,8 @@ export function json(res: ServerResponse, status: number, data: unknown) {
 }
 
 export function failure(res: ServerResponse, error: unknown) {
-  if (error instanceof HttpError) json(res, error.status, { error: error.message })
-  else json(res, 500, { error: 'The request could not be completed.' })
+  if (error instanceof HttpError) json(res, error.status, { error: error.message, category: error.category })
+  else json(res, 500, { error: 'The request could not be completed.', category: 'application_failure' })
 }
 
 export function sameOrigin(req: Request) {
