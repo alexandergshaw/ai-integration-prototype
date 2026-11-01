@@ -105,17 +105,80 @@ textarea { resize: vertical; min-height: 100px; }
 .activity-detail h4 { font-size: 11px; }
 .error { padding: 12px; background: #fff1ef; border: 1px solid #e9c7c0; border-radius: 7px; color: #8b3024 !important; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 footer { text-align: center; font-size: 10px; line-height: 1.6; color: var(--muted); margin-top: 25px; }
-.gate { width: min(100% - 40px, 540px); margin: 10vh auto; padding: 35px; background: #fff; border: 1px solid var(--line); border-radius: 20px; box-shadow: 0 12px 50px #183b5110; }
-.gate h1 { font-size: 30px; margin: 20px 0; }
-.gate > p:not(.eyebrow) { font-size: 14px; color: var(--muted); line-height: 1.7; }
-.gate form { margin: 30px 0; }
-.gate form button { width: 100%; margin-top: 14px; }
-.gate small { font-size: 10px; line-height: 1.8; color: var(--muted); }
+.topbar { min-height: 72px; padding: 16px max(24px, calc((100% - 1440px) / 2)); gap: 28px; }
+.brand { font-size: 21px; letter-spacing: -.6px; }
+.brand-mark { width: 30px; height: 30px; border-radius: 8px; }
+.tagline { font-size: 13px; }
+.fictional-label { font-size: 11px; padding: 6px 11px; }
+.text-button { font-size: 12px; }
+.workspace { max-width: 1488px; padding: 36px 32px 28px; }
+.workspace-heading { max-width: 780px; margin-bottom: 28px; }
+.workspace-heading .eyebrow { margin-bottom: 10px; }
+h1 { font-size: 34px; letter-spacing: -1.2px; margin-bottom: 10px; }
+.workspace-heading > p:last-child { max-width: 720px; font-size: 15px; line-height: 1.65; }
+.workspace-grid { grid-template-columns: minmax(240px, .78fr) minmax(0, 1.3fr) minmax(300px, .92fr); gap: 22px; }
+.evidence-rail, .educator-panel, .suggestion-panel { border-radius: 12px; box-shadow: var(--shadow); }
+.evidence-rail { background: var(--surface); }
+.evidence-rail > summary { padding: 16px 18px; background: var(--surface-muted); font-size: 13px; }
+.rail-content { padding: 18px; }
+.rail-content h2 { font-size: 20px; }
+.lesson-goal, blockquote { font-size: 12px; }
+.source-meta, .rubric-note, .rail-footnote { font-size: 11px; }
+.rail-content h3 { font-size: 13px; }
+.metrics { gap: 16px; }
+.metrics strong { font-size: 32px; }
+.metrics b { font-size: 13px; }
+.metrics div > span { font-size: 11px; }
+.student-work h4 { font-size: 12px; }
+.stepper { padding: 15px 20px; }
+.stepper button { font-size: 12px; }
+.stepper button > span { width: 24px; height: 24px; }
+.editor-content { padding: 28px; }
+.editor-content h2 { font-size: 24px; }
+.section-intro { font-size: 13px; }
+.status-label { font-size: 10px; }
+label { font-size: 13px; }
+textarea, input { border-radius: 7px; background: #fff; padding: 12px 14px; font-size: 14px; }
+.field-note { font-size: 11px; }
+.request-area > .eyebrow { font-size: 10px; }
+.primary, .secondary { border-radius: 7px; padding: 11px 15px; font-size: 13px; }
+.suggestion-panel { padding: 24px; border-top-width: 2px; }
+.ai-panel-heading { gap: 12px; padding-bottom: 18px; }
+.ai-icon { width: 34px; height: 34px; font-size: 22px; }
+.ai-panel-heading h2 { font-size: 17px; }
+.empty-state { padding: 36px 8px 28px; }
+.suggestion-panel h3 { font-size: 14px; }
+.suggestion-panel p { font-size: 13px; }
+.source-links a { font-size: 10px; }
+.uncertainty p, .uncertainty h3 { font-size: 12px; }
+.decision-trail { padding: 20px 2px; }
+.decision-trail h2 { font-size: 14px; }
+.decision-trail > p { font-size: 13px; }
+.decision-record summary { font-size: 12px; }
+.decision-record p, .decision-record time { font-size: 11px; }
+footer { max-width: 900px; margin: 28px auto 0; font-size: 11px; }
+.gate { width: 100%; min-height: 100svh; margin: 0; padding: 24px; display: grid; place-items: center; }
+.gate-card { width: min(100%, 440px); padding: 34px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+.gate-card > .eyebrow { margin: 0 0 12px; line-height: 1.5; }
+.gate-card h1 { font-size: 28px; letter-spacing: -.8px; margin: 0 0 8px; }
+.gate-card > p:not(.eyebrow) { font-size: 14px; color: var(--muted); line-height: 1.6; margin: 0; }
+.gate-card form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; margin: 22px 0 14px; }
+.gate-card form label { grid-column: 1 / -1; margin: 0 0 -3px; }
+.gate-card form input { min-width: 0; }
+.gate-card form button { white-space: nowrap; }
+.gate-card form .error { grid-column: 1 / -1; margin: 0; }
+.gate-card small { font-size: 10px; line-height: 1.6; color: var(--muted); }
+.gate[role="status"] { font-size: 14px; color: var(--muted); }
 @media (min-width: 1100px) { .evidence-rail > summary { pointer-events: none; list-style: none; } }
 @media (max-width: 1099px) {
   .topbar { flex-wrap: wrap; gap: 12px; }
   .tagline { display: none; }
   .workspace-grid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+  .gate-card { padding: 28px; }
+  .gate-card h1 { font-size: 25px; }
+  .gate-card form { grid-template-columns: 1fr; }
+  .gate-card form label { grid-column: auto; }
+  .gate-card form button { width: 100%; }
   .evidence-rail { grid-column: 1 / -1; grid-row: 2; }
   .rail-content { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 25px; }
   .rail-content .math-model, .rail-content .model-caption { display: none; }
@@ -140,6 +203,6 @@ footer { text-align: center; font-size: 10px; line-height: 1.6; color: var(--mut
   .field-heading { flex-wrap: wrap; }
   .rail-content { display: block; }
   .suggestion-panel { padding: 19px; }
-  .gate { padding: 24px; }
-  .gate h1 { font-size: 25px; }
+  .gate { padding: 16px; }
+  .gate-card { padding: 24px; }
 }

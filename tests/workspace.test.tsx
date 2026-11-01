@@ -25,8 +25,16 @@ describe('Workspace interaction and provider-idle boundaries', () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ authenticated: false }) })
     render(<App />)
     expect(await screen.findByLabelText('Demo access code')).toBeTruthy()
+    expect(screen.getByText('VALUE ADD OF TECHNOLOGY ON TEACHING (VATT)')).toBeTruthy()
+    expect(screen.getByText('A focused demo of the AI–educator interaction. The educator stays in charge.')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0][0]).toBe('/api/session')
+  })
+  it('frames the workspace as a VATT interaction demo', () => {
+    render(<Workspace onLock={() => {}} />)
+    expect(screen.getByText('VALUE ADD OF TECHNOLOGY ON TEACHING (VATT)')).toBeTruthy()
+    expect(screen.getByText('AI integration demo · Fictional data')).toBeTruthy()
+    expect(screen.getByText(/focused demo of AI interactions that help an educator examine evidence/)).toBeTruthy()
   })
   it('typing and inspecting evidence do not request AI; explicit click sends current text', async () => {
     const user = userEvent.setup()

@@ -1,8 +1,8 @@
 # Inquiry
 
-**AI challenges the reasoning; educators own the decision.**
+**AI supports educator thinking; educators own the decisions.**
 
-A personal, fictional interview prototype: one AI Coaching Workspace, three independently requested Gemini API interactions, and explicit educator decisions. Not a Leading Educators product, partnership, or endorsement.
+A focused demo of the **Value Add of Technology on Teaching (VATT)** principle: AI can offer a useful second perspective while the educator owns the thinking and every decision. This is one fictional AI–educator interaction workspace—not a complete PLC application, nor a Leading Educators product, partnership, or endorsement.
 
 ## What works
 
