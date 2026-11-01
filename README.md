@@ -22,7 +22,7 @@ AI runs only on a button click. Errors never replace educator work with a script
    | Variable | Value |
    | --- | --- |
    | `GEMINI_API_KEY` | Your Google AI Studio Gemini API key |
-   | `GEMINI_MODEL` | Optional model override; default `gemini-3.8-flash` |
+   | `GEMINI_MODEL` | Optional model override; default `gemini-2.5-flash` |
    | `DEMO_ACCESS_CODE` | A nonblank access code |
    | `SESSION_SECRET` | A separate nonblank secret for signing sessions |
 
@@ -32,17 +32,17 @@ AI runs only on a button click. Errors never replace educator work with a script
 7. Verify all three live actions. Inspect sources/limits, Reject a challenge and retain your question, request another challenge and Accept, refine and Confirm inquiry, then request the 15-minute rehearsal. Test both activity decisions and the Needs review state. See [the demo script](docs/DEMO_SCRIPT.md).
 8. After changing runtime variables, redeploy using the Vercel dashboard. A deployment without the required session secrets fails closed; without an API key it can unlock but cannot generate suggestions.
 
-**Secrets are separate:** Copilot agent secrets support cloud development; GitHub Actions secrets support CI; Vercel Environment Variables supply the deployed API's runtime. Adding a secret to one does not configure the others. This CI needs no model credentials.
+**Secrets are separate:** Copilot agent secrets support cloud development; GitHub Actions secrets support CI; local `.env` files supply local Vite development; Vercel Environment Variables supply the deployed API's runtime. Adding a secret to one does not configure the others. This CI needs no model credentials. `GEMINI_API_KEY` is canonical; a nonblank `Gemini_LLM_API_Key` is accepted only when the canonical value is blank or absent.
 
 ### Troubleshooting Gemini
 
 Gemini request failures do not change your drafts. Authentication/access errors mean you should check `GEMINI_API_KEY` and the associated Google AI Studio project's permissions; model-not-found errors mean you should check `GEMINI_MODEL` and that project's model access. HTTP 400 means Gemini rejected the request: check the key, model, and structured-output configuration rather than assuming the output was invalid. Rate limits can reflect quota exhaustion; temporary provider failures can be retried later.
 
-The provider schema converts Zod literal `const` constraints to single-value `enum` constraints supported by the pinned Gemini SDK, including the action and canonical mathematical representation. String-length limits remain enforced by server-side Zod validation, not the provider schema. After deploying schema changes, verify all three live actions; mocked tests cannot establish whether a particular API key and model accept the request.
+The provider schema converts Zod literal `const` constraints to single-value `enum` constraints and preserves documented length, number, and array bounds; server-side Zod and citation checks remain authoritative. After deploying schema changes, verify all three live actions; mocked tests cannot establish whether a particular API key and model accept the request.
 
 The browser's `/api/coach` HTTP 502 is the app's error status, not necessarily Gemini's status. The displayed error includes Gemini's HTTP status for otherwise unclassified provider rejections (such as HTTP 422), or distinguishes incomplete responses, empty text, malformed JSON, and failed validation. Those response failures do not by themselves establish a credential or configuration problem.
 
-In **Vercel → Project → Logs**, select the deployment you are actually using, clear restrictive filters, reproduce the failure, and look for `/api/coach`, `Gemini coach request failed`, or `Gemini coach response rejected`. The app logs only the provider HTTP status and action, or a fixed failure category—never raw provider errors, response content, API keys, or educator text. If logs are unavailable, use the displayed error to distinguish the failure. Check variables for the failing deployment environment and redeploy after any changes. If the old generic message remains after redeploying, check that the URL points to the new deployment. Do not share credentials when troubleshooting.
+In **Vercel → Project → Logs**, select the deployment you are actually using, clear restrictive filters, reproduce the failure, and look for `/api/coach` and `Gemini coach failure`. The structured server diagnostic includes a request ID, action, resolved model, stage/category, elapsed time, and only safe provider status, finish reason, usage counts, or validation paths when available—never raw provider errors, prompts, response content, API keys, authorization headers, or educator text. It can distinguish configuration, provider rejection, timeout/network, incomplete response, JSON, schema, and citation failures. Check variables for the failing deployment environment and redeploy after any changes. Do not share credentials when troubleshooting.
 
 ## Trust and cost boundaries
 
@@ -50,7 +50,7 @@ In **Vercel → Project → Logs**, select the deployment you are actually using
 - The server reconstructs evidence from allowlisted IDs; client-provided evidence/metadata and unknown IDs are rejected. The optional September one-classroom observation is deliberately **not included** in this demo or its API allowlist. There is no role picker or way to unlock it by request tampering.
 - Metrics are separate rubric measures: 68/96 correct products and 29/96 adequate explanations, with unknown group overlap. Illustrative student work establishes neither prevalence nor causality.
 - HMAC-signed, two-hour, HttpOnly, SameSite=Strict cookies protect paid calls; production cookies are Secure. Same-origin checks protect mutations. Login uses constant-time comparisons. Logout clears the browser cookie; a copied cookie is still valid until expiry. Rotate `SESSION_SECRET` to revoke all sessions.
-- Requests are strictly validated and limited to 12 KiB (including streamed and platform-parsed bodies). Human text has a 2,000-character limit. Each call allows at most 2,200 output tokens, a 25-second provider timeout, no automatic provider retries, and no conversation replay. Browser cancellation discards results but may not prevent already-started provider charges.
+- Requests are strictly validated and limited to 12 KiB (including streamed and platform-parsed bodies). Human text has a 2,000-character limit. Each action makes one generation request with an 8,192-token output ceiling, a 60-second provider timeout, a 75-second browser deadline, and a 90-second Vercel function limit. The provider timeout leaves time for a useful server response, and the SDK is configured for one attempt. The larger output ceiling can increase cost and latency, but structured responses are never truncated or accepted when incomplete. Browser cancellation discards results but may not prevent already-started provider charges.
 - Zod validates action-specific model output, exact 15-minute duration, canonical mathematical representation, and 1–3 unique references to requested allowed sources. Invalid output is rejected—not shown as verified. Model prose still requires educator inspection; structured validation cannot guarantee pedagogical truth.
 - Educator text is untrusted input, not system instructions. No tools, arbitrary prompts, raw-input logging, or fallback suggestions. The app keeps no provider conversation or persistent user content; provider processing and retention follow Google's Gemini API terms and project data controls. Use only fictional, non-sensitive text.
 
@@ -62,9 +62,9 @@ The cloud agent and GitHub Actions run:
 
 - `npm run typecheck`
 - `npm run lint` (the Vite scaffold's Oxlint)
-- `npm test` (Vitest, reducer/UI tests, and API tests mocking only the external provider)
+- `npm test` (Vitest reducer/UI/API tests plus installed-SDK wire tests against an intercepted mock transport)
 - `npm run build`
 
-No real model call is claimed by automated tests. Configure the Vercel runtime and verify live behavior after deployment. The local Vite API adapter uses the same serverless handlers and requires the same server-only environment variables.
+No live model call is claimed by automated tests. Configure the Vercel runtime and verify live behavior after deployment. The local Vite API adapter uses the same serverless handlers and requires the same server-only environment variables.
 
-Official implementation references: [Google Gen AI SDK](https://github.com/googleapis/js-genai), [Gemini 3.8 Flash model](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash), [Gemini structured output](https://ai.google.dev/gemini-api/docs/generate-content/structured-output), [Vercel Vite](https://vercel.com/docs/frameworks/frontend/vite), and [Vercel Functions](https://vercel.com/docs/functions). SDK configuration signatures were checked against the pinned installed SDK version. See [design decisions](docs/DESIGN_DECISIONS.md) for scope and proposed pilot measures.
+Official implementation references: [Google Gen AI SDK](https://github.com/googleapis/js-genai), [Gemini 2.5 Flash model](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash), [Gemini thinking](https://ai.google.dev/gemini-api/docs/generate-content/thinking), [Gemini structured output](https://ai.google.dev/gemini-api/docs/generate-content/structured-output), [Vercel Vite](https://vercel.com/docs/frameworks/frontend/vite), and [Vercel Function duration](https://vercel.com/docs/functions/configuring-functions/duration). SDK configuration signatures and retry behavior were checked against the pinned installed SDK version. See [design decisions](docs/DESIGN_DECISIONS.md) for scope and proposed pilot measures.

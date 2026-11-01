@@ -3,7 +3,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/*.ts": { "maxDuration": 30 }
+    "api/*.ts": { "maxDuration": 90 }
   },
   "headers": [
     {

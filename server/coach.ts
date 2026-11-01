@@ -1,9 +1,16 @@
 import { GoogleGenAI, ApiError } from '@google/genai'
+import { performance } from 'node:perf_hooks'
 import { z } from 'zod'
 import { evidence, learningGoal } from '../shared/evidence.ts'
 import { activitySchema, challengeSchema, refineSchema, suggestionSchema } from '../shared/schemas.ts'
 import type { CoachRequest } from '../shared/schemas.ts'
 import { HttpError } from './http.ts'
+import {
+  GEMINI_PROVIDER_TIMEOUT_MS,
+  getGeminiApiKey,
+  getGeminiGenerationOptions,
+  getGeminiModel,
+} from './geminiConfig.ts'
 
 const ALLOWED_SOURCE_IDS = new Set(['assessment-2026-10-28', 'work-A', 'work-B', 'work-C'])
 
@@ -15,22 +22,12 @@ Evidence is hypothetical, public demo data. Cite only provided source IDs, with 
 The assessment's correct-product and conceptual-explanation metrics use separate hypothetical scoring rubrics. Their overlap is unknown; do not subtract them to infer learner groups.
 Descriptive data do not establish causation. State uncertainty and causal limits explicitly.
 Mathematical safety: 0.3 × 0.4 = 0.12, three tenths of four tenths, with 12 overlapping hundredths on a 10 × 10 area model. Never confuse twelve hundredths with twelve tenths.
+Every response must obey the exact field and character limits in the response schema. Cite 1–3 unique source IDs from the supplied sources only.
 Action-specific tasks:
 For challenge, distinguish documented evidence from speculation. Explain which supplied evidence supports or complicates the educator's interpretation and cite its source ID. Offer one meaningful, explicitly tentative counterhypothesis—not a diagnosis—plus one specific instructional question and a revised interpretation draft the educator may edit. Do not write a PLC inquiry question in this action.
 For refine_inquiry, use only the educator-confirmed interpretation and current educator-authored inquiry draft as context. Return exactly one focused question about mathematical reasoning in suggestedInquiry. Never use unaccepted suggestions or prior request history. Preserve the educator's inquiry intent without prescribing an intervention or making causal claims.
-For suggest_activity, return exactly one realistic 15-minute teacher rehearsal aligned to the learning goal, not a whole meeting plan. Use only confirmedInquiry as the educator context, together with the provided sources and learning goal; do not assume earlier drafts, interpretations, or team decisions. Include an objective, a concrete activity using decimal multiplication and place-value models, exactly two mathematical discussion prompts, one anticipated student misconception, what teachers should practice, and what student evidence could be examined afterward. Rehearsal segments must total exactly 15 minutes. Do not present a finalized team strategy.`;
-
-const RESPONSE_FAILURES = {
-  incomplete: 'Gemini did not finish the response normally.',
-  empty: 'Gemini returned no response text.',
-  json: 'Gemini returned malformed JSON.',
-  validation: 'Gemini returned a response that failed the coach validation checks.',
-}
-
-function invalidResponse(action: CoachRequest['action'], reason: keyof typeof RESPONSE_FAILURES) {
-  console.error('Gemini coach response rejected', { action, reason })
-  return new HttpError(502, `${RESPONSE_FAILURES[reason]} Your work is unchanged; please retry. If this continues, ask the project owner to review the model and structured-output configuration.`)
-}
+For suggest_activity, return exactly one realistic 15-minute teacher rehearsal aligned to the learning goal, not a whole meeting plan. Use only confirmedInquiry as the educator context, together with the provided sources and learning goal; do not assume earlier drafts, interpretations, or team decisions. Include an objective, a concrete activity using decimal multiplication and place-value models, exactly two mathematical discussion prompts, one anticipated student misconception, what teachers should practice, and what student evidence could be examined afterward. Rehearsal segments must total exactly 15 minutes. Do not present a finalized team strategy.
+Keep challenge evidenceConsideration and alternativeHypothesis within 1,200 characters; probingQuestion and revisedInterpretation within 2,000. Keep refine_inquiry suggestedInquiry within 2,000 characters. For suggest_activity, keep name within 160 characters, objective within 600, and each step instruction, discussion prompt, anticipated misconception, teacher-practice description, and student-evidence description within 600. Use 2–6 steps, each 1–15 minutes, totaling exactly 15 minutes.`;
 
 function providerSchema(schema: typeof challengeSchema | typeof refineSchema | typeof activitySchema) {
   const jsonSchema = z.toJSONSchema(schema, { target: 'draft-7' })
@@ -38,10 +35,111 @@ function providerSchema(schema: typeof challengeSchema | typeof refineSchema | t
     if (Array.isArray(value)) return value.map(toProviderSchema)
     if (!value || typeof value !== 'object') return value
     return Object.fromEntries(Object.entries(value)
-      .filter(([key]) => key !== '$schema' && key !== 'minLength' && key !== 'maxLength')
+      .filter(([key]) => key !== '$schema')
       .map(([key, child]) => key === 'const' ? ['enum', [child]] : [key, toProviderSchema(child)]))
   }
   return toProviderSchema(jsonSchema)
+}
+
+const SAFE_FINISH_REASONS = new Set([
+  'STOP', 'MAX_TOKENS', 'SAFETY', 'RECITATION', 'OTHER', 'BLOCKLIST',
+  'PROHIBITED_CONTENT', 'SPII', 'MALFORMED_FUNCTION_CALL', 'IMAGE_SAFETY',
+  'UNEXPECTED_TOOL_CALL', 'NO_IMAGE',
+])
+const SAFE_BLOCK_REASONS = new Set([
+  'SAFETY', 'OTHER', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'IMAGE_SAFETY', 'SPII',
+])
+const SAFE_FIELDS = new Set([
+  'action', 'evidenceConsideration', 'alternativeHypothesis', 'probingQuestion',
+  'revisedInterpretation', 'suggestedInquiry', 'activity', 'name', 'objective',
+  'steps', 'minutes', 'instruction', 'representation', 'discussionPrompts',
+  'anticipatedMisconception', 'teachersPractice', 'studentEvidence', 'rationale',
+  'limitations', 'sourceIds',
+])
+const USAGE_FIELDS = [
+  'promptTokenCount', 'candidatesTokenCount', 'totalTokenCount',
+  'thoughtsTokenCount', 'cachedContentTokenCount', 'toolUsePromptTokenCount',
+] as const
+
+type ProviderResponse = {
+  candidates?: Array<{ finishReason?: unknown }>
+  promptFeedback?: { blockReason?: unknown }
+  usageMetadata?: unknown
+  text?: string
+}
+
+function safePath(path: PropertyKey[]) {
+  return path.slice(0, 6).map((part) =>
+    typeof part === 'number' && Number.isSafeInteger(part) && part >= 0 ? part :
+      typeof part === 'string' && SAFE_FIELDS.has(part) ? part : '[unknown]')
+}
+
+function safeIssues(issues: Array<{ code: string; path: PropertyKey[] }>) {
+  return issues.slice(0, 20).map((issue) => ({
+    code: ['invalid_type', 'too_small', 'too_big', 'invalid_value', 'unrecognized_keys', 'custom'].includes(issue.code)
+      ? issue.code : 'other',
+    path: safePath(issue.path),
+  }))
+}
+
+function safeFinishReason(value: unknown) {
+  return typeof value === 'string' && SAFE_FINISH_REASONS.has(value) ? value : undefined
+}
+
+function safeBlockReason(value: unknown) {
+  return typeof value === 'string' && SAFE_BLOCK_REASONS.has(value) ? value : undefined
+}
+
+function safeUsage(response: ProviderResponse) {
+  const usage = response.usageMetadata
+  if (!usage || typeof usage !== 'object') return undefined
+  const safe = Object.fromEntries(USAGE_FIELDS.flatMap((field) => {
+    const value = (usage as Record<string, unknown>)[field]
+    return typeof value === 'number' && Number.isFinite(value) ? [[field, value]] : []
+  }))
+  return Object.keys(safe).length ? safe : undefined
+}
+
+function logFailure(
+  request: CoachRequest,
+  model: string,
+  startedAt: number,
+  fields: Record<string, unknown>,
+) {
+  console.error('Gemini coach failure', {
+    requestId: request.requestId,
+    action: request.action,
+    model,
+    elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    ...fields,
+  })
+}
+
+function providerCallFailureCategory(error: unknown) {
+  if (error instanceof TypeError || error instanceof Error && error.cause instanceof TypeError) {
+    return 'network_failure'
+  }
+  if (error instanceof SyntaxError) return 'sdk_response_parse_failure'
+  return 'sdk_failure'
+}
+
+function responseFailure(
+  request: CoachRequest,
+  model: string,
+  startedAt: number,
+  category: string,
+  message: string,
+  response?: ProviderResponse,
+  additional: Record<string, unknown> = {},
+) {
+  logFailure(request, model, startedAt, {
+    stage: category === 'local_validation' || category === 'citation_validation' ? 'validation' : 'response',
+    category,
+    finishReason: safeFinishReason(response?.candidates?.[0]?.finishReason),
+    usage: response ? safeUsage(response) : undefined,
+    ...additional,
+  })
+  return new HttpError(502, `${message} Your work is unchanged; please retry. If this continues, ask the project owner to review the model and structured-output configuration.`)
 }
 
 export function reconstructSources(sourceIds: string[]) {
@@ -54,14 +152,21 @@ export function reconstructSources(sourceIds: string[]) {
 }
 
 export async function generateSuggestion(request: CoachRequest) {
+  const startedAt = performance.now()
   const sources = reconstructSources(request.sourceIds)
-  const apiKey = process.env.GEMINI_API_KEY?.trim()
-  if (!apiKey) {
-    throw new HttpError(503, 'The coach provider is not configured. Ask the project owner to set GEMINI_API_KEY in Vercel project environment settings and redeploy. Your work is unchanged.')
+  const model = getGeminiModel()
+  let apiKey: string
+  try {
+    apiKey = getGeminiApiKey()
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 503) {
+      logFailure(request, model, startedAt, { stage: 'configuration', category: 'missing_api_key' })
+    }
+    throw error
   }
   const client = new GoogleGenAI({
     apiKey,
-    httpOptions: { timeout: 25_000, retryOptions: { attempts: 1 } },
+    httpOptions: { timeout: GEMINI_PROVIDER_TIMEOUT_MS, retryOptions: { attempts: 1 } },
   })
   const schema = request.action === 'challenge' ? challengeSchema :
     request.action === 'refine_inquiry' ? refineSchema : activitySchema
@@ -71,23 +176,25 @@ export async function generateSuggestion(request: CoachRequest) {
     } :
       { confirmedInquiry: request.confirmedInquiry }
   let text: string | undefined
+  let response
   try {
-    const response = await client.models.generateContent({
-      model: process.env.GEMINI_MODEL?.trim() || 'gemini-3.8-flash',
+    response = await client.models.generateContent({
+      model,
       contents: JSON.stringify({ action: request.action, ...humanInput, learningGoal, sources }),
       config: {
         systemInstruction: SYSTEM_INSTRUCTIONS,
         responseMimeType: 'application/json',
         responseJsonSchema: providerSchema(schema),
-        maxOutputTokens: 2200,
+        ...getGeminiGenerationOptions(model),
       },
     })
-    if (response.candidates?.[0]?.finishReason !== 'STOP') throw invalidResponse(request.action, 'incomplete')
-    text = response.text
   } catch (error) {
-    if (error instanceof HttpError) throw error
     if (error instanceof ApiError) {
-      console.error('Gemini coach request failed', { status: error.status, action: request.action })
+      logFailure(request, model, startedAt, {
+        stage: 'provider',
+        category: 'http_rejection',
+        providerStatus: error.status,
+      })
       if (error.status === 429) throw new HttpError(429, 'The coach provider is at capacity. Your work is unchanged; please retry later.')
       if (error.status === 401 || error.status === 403) {
         throw new HttpError(502, 'Gemini rejected authentication or denied access. Ask the project owner to check GEMINI_API_KEY and its Google AI Studio project permissions in Vercel project environment settings, then redeploy. Your work is unchanged.')
@@ -104,24 +211,66 @@ export async function generateSuggestion(request: CoachRequest) {
       throw new HttpError(502, `Gemini rejected the request (HTTP ${error.status}). Your work is unchanged; please retry. If this continues, ask the project owner to check the provider configuration in Vercel project environment settings.`)
     }
     if (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError')) {
-      console.error('Gemini coach request failed', { action: request.action, reason: 'timeout' })
+      logFailure(request, model, startedAt, { stage: 'provider', category: 'timeout' })
       throw new HttpError(504, 'The coach provider timed out. Your work is unchanged; please retry.')
     }
-    console.error('Gemini coach request failed', { action: request.action, reason: 'sdk_or_connection' })
+    logFailure(request, model, startedAt, {
+      stage: 'provider',
+      category: providerCallFailureCategory(error),
+    })
     throw new HttpError(502, 'The coach provider could not be reached. Your work is unchanged; please retry.')
   }
-  if (!text) throw invalidResponse(request.action, 'empty')
+  const candidate = response.candidates?.[0]
+  if (!candidate) {
+    throw responseFailure(
+      request, model, startedAt, 'no_candidate_or_blocked',
+      'Gemini returned no candidate or blocked the response.',
+      response,
+      { blockReason: safeBlockReason(response.promptFeedback?.blockReason) },
+    )
+  }
+  if (candidate.finishReason !== 'STOP') {
+    const category = candidate.finishReason === 'MAX_TOKENS' ? 'max_tokens' : 'incomplete_finish_reason'
+    const message = category === 'max_tokens'
+      ? 'Gemini ran out of output space before completing the response.'
+      : 'Gemini did not finish the response normally.'
+    throw responseFailure(request, model, startedAt, category, message, response)
+  }
+  text = response.text
+  if (typeof text !== 'string' || !text.trim()) {
+    throw responseFailure(request, model, startedAt, 'empty_text', 'Gemini returned no response text.', response)
+  }
   let output: unknown
   try {
     output = JSON.parse(text)
   } catch {
-    throw invalidResponse(request.action, 'json')
+    throw responseFailure(request, model, startedAt, 'invalid_json', 'Gemini returned malformed JSON.', response)
   }
   const parsed = suggestionSchema.safeParse(output)
-  if (!parsed.success || parsed.data.action !== request.action ||
-    new Set(parsed.data.sourceIds).size !== parsed.data.sourceIds.length ||
+  if (!parsed.success) {
+    throw responseFailure(
+      request, model, startedAt, 'local_validation',
+      'Gemini returned a response that failed the coach validation checks.',
+      response,
+      { validationIssues: safeIssues(parsed.error.issues) },
+    )
+  }
+  if (parsed.data.action !== request.action) {
+    throw responseFailure(
+      request, model, startedAt, 'local_validation',
+      'Gemini returned a response that failed the coach validation checks.',
+      response,
+      { validationIssues: [{ code: 'custom', path: ['action'] }] },
+    )
+  }
+  if (new Set(parsed.data.sourceIds).size !== parsed.data.sourceIds.length ||
     parsed.data.sourceIds.some((id) => !request.sourceIds.includes(id) || !sources.some((source) => source.id === id))) {
-    throw invalidResponse(request.action, 'validation')
+    throw responseFailure(
+      request, model, startedAt, 'citation_validation',
+      'Gemini returned citations that failed the coach validation checks.',
+      response,
+      { validationIssues: [{ code: 'custom', path: ['sourceIds'] }] },
+    )
   }
   return parsed.data
 }
