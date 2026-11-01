@@ -10,9 +10,10 @@ const common = {
 
 export const challengeSchema = z.object({
   action: z.literal('challenge'),
+  evidenceConsideration: z.string().min(1).max(1200),
   alternativeHypothesis: z.string().min(1).max(1200),
   probingQuestion: text,
-  suggestedInquiry: text,
+  revisedInterpretation: text,
   ...common,
 }).strict()
 
@@ -32,10 +33,10 @@ export const activitySchema = z.object({
       instruction: z.string().min(1).max(600),
     }).strict()).min(2).max(6),
     representation: z.literal('0.3 × 0.4 = 0.12; three tenths of four tenths; 12 overlapping hundredths on a 10 × 10 area model.'),
-    facilitatorQuestion: z.string().min(1).max(600),
+    discussionPrompts: z.array(z.string().min(1).max(600)).length(2),
     anticipatedMisconception: z.string().min(1).max(600),
-    teacherResponse: z.string().min(1).max(600),
-    implementationCheck: z.string().min(1).max(600),
+    teachersPractice: z.string().min(1).max(600),
+    studentEvidence: z.string().min(1).max(600),
   }).strict(),
   ...common,
 }).strict()
@@ -55,7 +56,9 @@ const requestCommon = {
 }
 export const coachRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('challenge'), educatorInterpretation: text, ...requestCommon }).strict(),
-  z.object({ action: z.literal('refine_inquiry'), inquiryDraft: text, ...requestCommon }).strict(),
+  z.object({
+    action: z.literal('refine_inquiry'), confirmedInterpretation: text, inquiryDraft: text, ...requestCommon,
+  }).strict(),
   z.object({ action: z.literal('suggest_activity'), confirmedInquiry: text, ...requestCommon }).strict(),
 ])
 export type CoachRequest = z.infer<typeof coachRequestSchema>

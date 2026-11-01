@@ -11,28 +11,35 @@ function receive(state: State, suggestion: Suggestion) {
 function decide(state: State, choice: 'accepted' | 'rejected') {
   return reducer(state, { type: 'decide', choice, at: '2026-11-01T12:01:00Z' })
 }
-const confirmedState = { ...initialState, step: 3 as const, challengeDecided: true, confirmedInquiry: initialState.inquiryDraft }
+const confirmedState = {
+  ...initialState, step: 3 as const, challengeDecided: true,
+  confirmedInterpretation: initialState.educatorInterpretation, confirmedInquiry: initialState.inquiryDraft,
+}
 
 describe('All six educator decisions', () => {
-  it('accepts challenge only into inquiry draft, preserving interpretation', () => {
+  it('accepts challenge into an editable interpretation draft without confirming it', () => {
     const next = decide(receive(initialState, challenge), 'accepted')
-    expect(next.inquiryDraft).toBe(challenge.action === 'challenge' && challenge.suggestedInquiry)
-    expect(next.educatorInterpretation).toBe(initialState.educatorInterpretation)
+    expect(next.educatorInterpretation).toBe(challenge.action === 'challenge' && challenge.revisedInterpretation)
+    expect(next.confirmedInterpretation).toBe('')
     expect(next.confirmedInquiry).toBe('')
-    expect(next.step).toBe(2)
+    expect(next.step).toBe(1)
+    expect(reducer(next, { type: 'confirmInterpretation' }).confirmedInterpretation).toBe(next.educatorInterpretation)
   })
   it('rejects challenge without changing educator work or blocking progress', () => {
     const next = decide(receive(initialState, challenge), 'rejected')
     expect(next.inquiryDraft).toBe(initialState.inquiryDraft)
     expect(next.educatorInterpretation).toBe(initialState.educatorInterpretation)
-    expect(next.step).toBe(2)
-    expect(requestFor(next, 'refine_inquiry', requestId)).toEqual({
-      action: 'refine_inquiry', inquiryDraft: initialState.inquiryDraft,
+    expect(next.step).toBe(1)
+    const progressed = reducer(next, { type: 'confirmInterpretation' })
+    expect(requestFor(progressed, 'refine_inquiry', requestId)).toEqual({
+      action: 'refine_inquiry', confirmedInterpretation: initialState.educatorInterpretation,
+      inquiryDraft: initialState.inquiryDraft,
       requestId, sourceIds: ['assessment-2026-10-28', 'work-A', 'work-B', 'work-C'],
     })
   })
   it('accepts refinement into draft without automatic confirmation', () => {
-    const next = decide(receive(initialState, refinement), 'accepted')
+    const confirmed = reducer(initialState, { type: 'confirmInterpretation' })
+    const next = decide(receive(confirmed, refinement), 'accepted')
     expect(next.inquiryDraft).toBe(refinement.action === 'refine_inquiry' && refinement.suggestedInquiry)
     expect(next.confirmedInquiry).toBe('')
     expect(reducer(next, { type: 'confirmInquiry' }).confirmedInquiry).toBe(next.inquiryDraft)
@@ -64,12 +71,20 @@ describe('Confirmation and stale-response boundaries', () => {
   it('permits educator-only progress without inventing an AI decision', () => {
     const next = reducer(initialState, { type: 'continueWithoutChallenge' })
     expect(next.step).toBe(2)
+    expect(next.confirmedInterpretation).toBe(initialState.educatorInterpretation)
     expect(next.inquiryDraft).toBe(initialState.inquiryDraft)
     expect(next.decisions).toEqual([])
     expect(next.confirmedInquiry).toBe('')
   })
   it('requires confirmed inquiry for activity requests', () => {
     expect(reducer(initialState, { type: 'start', id: requestId, action: 'suggest_activity' })).toEqual(initialState)
+  })
+  it('requires a confirmed interpretation before refining a PLC question', () => {
+    expect(requestFor(initialState, 'refine_inquiry', requestId)).toMatchObject({
+      confirmedInterpretation: '',
+    })
+    expect(reducer(initialState, { type: 'step', step: 2 })).toEqual(initialState)
+    expect(reducer(initialState, { type: 'start', id: requestId, action: 'refine_inquiry' })).toEqual(initialState)
   })
   it('uses confirmed inquiry only, without rejected suggestions or interpretations', () => {
     expect(requestFor(confirmedState, 'suggest_activity', requestId)).toEqual({
@@ -88,6 +103,18 @@ describe('Confirmation and stale-response boundaries', () => {
     expect(reducer(state, { type: 'confirmActivity' }).confirmedActivity).toBe('')
     state = reducer(state, { type: 'reviewActivity' })
     expect(reducer(state, { type: 'confirmActivity' }).confirmedActivity).toBe(state.activityDraft)
+  })
+  it('invalidates inquiry and activity alignment when a changed interpretation is confirmed', () => {
+    const state = {
+      ...confirmedState, activityDraft: 'A prior rehearsal', confirmedActivity: 'A prior rehearsal',
+    }
+    const edited = reducer(state, { type: 'edit', field: 'educatorInterpretation', value: 'A revised educator interpretation.' })
+    expect(edited.confirmedInquiry).toBe(state.confirmedInquiry)
+    const confirmed = reducer(edited, { type: 'confirmInterpretation' })
+    expect(confirmed.confirmedInterpretation).toBe('A revised educator interpretation.')
+    expect(confirmed.confirmedInquiry).toBe('')
+    expect(confirmed.activityNeedsReview).toBe(true)
+    expect(confirmed.confirmedActivity).toBe('')
   })
   it('does not invalidate activity when the same inquiry is confirmed', () => {
     const accepted = decide(receive(confirmedState, rehearsal), 'accepted')

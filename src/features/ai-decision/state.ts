@@ -10,6 +10,7 @@ export type Decision = {
 }
 export type State = {
   educatorInterpretation: string
+  confirmedInterpretation: string
   inquiryDraft: string
   confirmedInquiry: string
   activityDraft: string
@@ -26,6 +27,7 @@ export type State = {
 
 export const initialState: State = {
   educatorInterpretation: 'Many students can select the correct product but may be relying on decimal-placement procedures instead of understanding place value.',
+  confirmedInterpretation: '',
   inquiryDraft: 'How can we tell whether students understand why multiplying tenths produces hundredths?',
   confirmedInquiry: '', activityDraft: '', confirmedActivity: '', activityInquiry: '',
   activityNeedsReview: false, step: 1, challengeDecided: false,
@@ -33,14 +35,16 @@ export const initialState: State = {
 }
 
 export function formatActivity(activity: Activity): string {
-  return `${activity.name}\n\nObjective: ${activity.objective}\n\n${activity.steps.map((step) => `${step.minutes} min · ${step.instruction}`).join('\n')}\n\nRepresentation: ${activity.representation}\n\nFacilitator question: ${activity.facilitatorQuestion}\n\nAnticipated misconception: ${activity.anticipatedMisconception}\n\nPossible teacher response: ${activity.teacherResponse}\n\nImplementation check: ${activity.implementationCheck}`
+  return `${activity.name}\n\nObjective: ${activity.objective}\n\n${activity.steps.map((step) => `${step.minutes} min · ${step.instruction}`).join('\n')}\n\nRepresentation: ${activity.representation}\n\nDiscussion prompts:\n${activity.discussionPrompts.map((prompt) => `- ${prompt}`).join('\n')}\n\nAnticipated misconception: ${activity.anticipatedMisconception}\n\nWhat teachers practice: ${activity.teachersPractice}\n\nStudent evidence to examine afterward: ${activity.studentEvidence}`
 }
 
 export function requestFor(state: State, action: CoachAction, requestId: string): CoachRequest {
   const common = { sourceIds: [...sourceIds], requestId }
   switch (action) {
     case 'challenge': return { action, educatorInterpretation: state.educatorInterpretation, ...common }
-    case 'refine_inquiry': return { action, inquiryDraft: state.inquiryDraft, ...common }
+    case 'refine_inquiry': return {
+      action, confirmedInterpretation: state.confirmedInterpretation, inquiryDraft: state.inquiryDraft, ...common,
+    }
     case 'suggest_activity': return { action, confirmedInquiry: state.confirmedInquiry, ...common }
   }
 }
@@ -53,6 +57,7 @@ type Event =
   | { type: 'error'; requestId: string; message: string }
   | { type: 'cancel' }
   | { type: 'decide'; choice: 'accepted' | 'rejected'; at: string }
+  | { type: 'confirmInterpretation' }
   | { type: 'confirmInquiry' }
   | { type: 'continueWithoutChallenge' }
   | { type: 'confirmActivity' }
@@ -73,13 +78,21 @@ export function reducer(state: State, event: Event): State {
     case 'edit': return {
       ...discardPending(state), [event.field]: event.value, request: null, error: '',
       ...(event.field === 'activityDraft' ? { confirmedActivity: '' } : {}),
+      ...(event.field === 'educatorInterpretation' ? { challengeDecided: false, step: 1 as const } : {}),
     }
     case 'step':
-      if (event.step === 2 && !state.challengeDecided) return state
-      if (event.step === 3 && (!state.confirmedInquiry || state.inquiryDraft.trim() !== state.confirmedInquiry)) return state
+      if (event.step === 2 && (!state.challengeDecided ||
+        !state.confirmedInterpretation || state.educatorInterpretation.trim() !== state.confirmedInterpretation)) return state
+      if (event.step === 3 && (!state.confirmedInterpretation ||
+        state.educatorInterpretation.trim() !== state.confirmedInterpretation ||
+        !state.confirmedInquiry || state.inquiryDraft.trim() !== state.confirmedInquiry)) return state
       return { ...discardPending(state), step: event.step, request: null, error: '' }
     case 'start':
-      if (event.action === 'suggest_activity' && (!state.confirmedInquiry ||
+      if (event.action === 'refine_inquiry' && (!state.confirmedInterpretation ||
+        state.educatorInterpretation.trim() !== state.confirmedInterpretation)) return state
+      if (event.action === 'suggest_activity' && (!state.confirmedInterpretation ||
+        state.educatorInterpretation.trim() !== state.confirmedInterpretation ||
+        !state.confirmedInquiry ||
         state.inquiryDraft.trim() !== state.confirmedInquiry)) return state
       return { ...discardPending(state), request: { id: event.id, action: event.action }, error: '' }
     case 'received':
@@ -95,19 +108,20 @@ export function reducer(state: State, event: Event): State {
       return state.request?.id === event.requestId ? { ...state, request: null, error: event.message } : state
     case 'cancel': return { ...state, request: null, error: 'Request cancelled. Your work is unchanged.' }
     case 'continueWithoutChallenge':
-      if (state.request || state.pending || !state.educatorInterpretation.trim()) return state
-      return { ...state, challengeDecided: true, step: 2, error: '' }
+      return reducer(state, { type: 'confirmInterpretation' })
     case 'decide': {
       if (!state.pending) return state
       const { id, suggestion } = state.pending
       let next = { ...state, pending: null, error: '' }
-      if (suggestion.action === 'challenge') next = { ...next, challengeDecided: true, step: 2 }
+      if (suggestion.action === 'challenge') next = { ...next, challengeDecided: true }
       if (event.choice === 'accepted') {
         if (suggestion.action === 'suggest_activity') {
           next = {
             ...next, activityDraft: formatActivity(suggestion.activity), confirmedActivity: '',
             activityInquiry: state.confirmedInquiry, activityNeedsReview: false,
           }
+        } else if (suggestion.action === 'challenge') {
+          next = { ...next, educatorInterpretation: suggestion.revisedInterpretation }
         } else {
           next = { ...next, inquiryDraft: suggestion.suggestedInquiry }
         }
@@ -119,9 +133,21 @@ export function reducer(state: State, event: Event): State {
           : decision),
       }
     }
+    case 'confirmInterpretation': {
+      const interpretation = state.educatorInterpretation.trim()
+      if (!interpretation || state.request || state.pending) return state
+      const changed = !!state.confirmedInterpretation && interpretation !== state.confirmedInterpretation
+      return {
+        ...state, confirmedInterpretation: interpretation, challengeDecided: true, step: 2, error: '',
+        ...(changed ? {
+          confirmedInquiry: '', activityNeedsReview: !!state.activityDraft, confirmedActivity: '',
+        } : {}),
+      }
+    }
     case 'confirmInquiry': {
       const inquiry = state.inquiryDraft.trim()
-      if (!inquiry || state.request || state.pending) return state
+      if (!inquiry || state.request || state.pending || !state.confirmedInterpretation ||
+        state.educatorInterpretation.trim() !== state.confirmedInterpretation) return state
       const needsReview = !!state.activityDraft && state.activityInquiry !== inquiry
       return {
         ...state, confirmedInquiry: inquiry, inquiryDraft: inquiry, step: 3,
@@ -135,7 +161,8 @@ export function reducer(state: State, event: Event): State {
         activityInquiry: state.confirmedInquiry,
       }
     case 'confirmActivity':
-      if (!state.activityDraft.trim() || state.activityNeedsReview ||
+      if (!state.activityDraft.trim() || state.activityNeedsReview || !state.confirmedInterpretation ||
+        state.educatorInterpretation.trim() !== state.confirmedInterpretation ||
         state.inquiryDraft.trim() !== state.confirmedInquiry || !state.confirmedInquiry) return state
       return { ...state, confirmedActivity: state.activityDraft, activityInquiry: state.confirmedInquiry }
   }
