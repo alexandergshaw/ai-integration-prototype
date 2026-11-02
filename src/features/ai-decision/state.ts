@@ -14,9 +14,13 @@ export type Decision = {
   appliedToDraft: boolean
   origin: Origin
 }
+export type InterpretationSource = 'mine' | 'ai'
 export type State = {
   scenario: ExampleScenario | null
   educatorInterpretation: string
+  interpretationSource: InterpretationSource
+  originalInterpretation: string
+  aiInterpretation: string
   confirmedInterpretation: string
   inquiryDraft: string
   confirmedInquiry: string
@@ -41,6 +45,9 @@ export type State = {
 export const initialState: State = {
   scenario: workspaceScenario,
   educatorInterpretation: 'Many students can select the correct product but may be relying on decimal-placement procedures instead of understanding place value.',
+  interpretationSource: 'mine',
+  originalInterpretation: '',
+  aiInterpretation: '',
   confirmedInterpretation: '',
   inquiryDraft: 'How can we tell whether students understand why multiplying tenths produces hundredths?',
   confirmedInquiry: '', activityDraft: '', confirmedActivity: '', activityInquiry: '',
@@ -74,6 +81,7 @@ type Event =
   | { type: 'demo'; failedRequestId: string; id: string; at: string }
   | { type: 'cancel' }
   | { type: 'decide'; choice: 'accepted' | 'rejected'; at: string }
+  | { type: 'selectInterpretation'; source: InterpretationSource }
   | { type: 'confirmInterpretation' }
   | { type: 'confirmInquiry' }
   | { type: 'continueWithoutChallenge' }
@@ -96,7 +104,10 @@ function transition(state: State, event: Event): State {
       ...discardPending(state), [event.field]: event.value, request: null, fallback: null,
       error: state.supportBlocked ? state.error : '',
       ...(event.field === 'activityDraft' ? { confirmedActivity: '' } : {}),
-      ...(event.field === 'educatorInterpretation' ? { challengeDecided: false, step: 1 as const } : {}),
+      ...(event.field === 'educatorInterpretation' ? {
+        challengeDecided: false, step: 1 as const,
+        ...(state.interpretationSource === 'ai' ? { aiInterpretation: event.value } : {}),
+      } : {}),
     }
     case 'step':
       if (event.step === 2 && (!state.challengeDecided ||
@@ -172,7 +183,13 @@ function transition(state: State, event: Event): State {
             activityNeedsReview: state.pending.origin === 'demo',
           }
         } else if (suggestion.action === 'challenge') {
-          next = { ...next, educatorInterpretation: suggestion.revisedInterpretation }
+          next = {
+            ...next,
+            originalInterpretation: state.originalInterpretation || state.educatorInterpretation,
+            aiInterpretation: suggestion.revisedInterpretation,
+            interpretationSource: 'ai',
+            educatorInterpretation: suggestion.revisedInterpretation,
+          }
         } else {
           next = { ...next, inquiryDraft: suggestion.suggestedInquiry }
         }
@@ -182,6 +199,16 @@ function transition(state: State, event: Event): State {
         decisions: state.decisions.map((decision) => decision.id === id
           ? { ...decision, choice: event.choice, at: event.at, appliedToDraft: event.choice === 'accepted' }
           : decision),
+      }
+    }
+    case 'selectInterpretation': {
+      const target = event.source === 'ai' ? state.aiInterpretation : state.originalInterpretation
+      if (!state.aiInterpretation || !target ||
+        state.interpretationSource === event.source || state.request || state.pending) return state
+      return {
+        ...state, educatorInterpretation: target, interpretationSource: event.source,
+        challengeDecided: true, step: 1, request: null, fallback: null,
+        error: state.supportBlocked ? state.error : '',
       }
     }
     case 'confirmInterpretation': {

@@ -76,6 +76,21 @@ textarea { resize: vertical; min-height: 100px; }
 .ai-panel-heading { border-bottom: 1px solid var(--line); padding: 12px 0 16px; margin-bottom: 20px; }
 .ai-panel-heading h2 { font-size: 15px; font-weight: 600; margin: 6px 0 0; }
 .empty-state { padding: 4px 0 16px; }
+.loading-state h3 { display: flex; align-items: center; gap: 10px; }
+.spinner { display: inline-block; width: 15px; height: 15px; flex: none; border: 2px solid var(--line); border-top-color: var(--teal); border-radius: 50%; }
+.request-loading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+.loading-indicator { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; color: var(--navy); }
+.interpretation-source { margin: 14px 0 18px; display: grid; gap: 10px; justify-items: start; }
+.confirmed-inquiry .interpretation-source { margin: 14px 0 0; }
+.source-status { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; color: var(--navy); }
+.source-status strong { font-weight: 600; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); flex: none; }
+.interpretation-source > details { margin: 0; }
+.more-detail { margin-top: 16px; }
+@media (prefers-reduced-motion: no-preference) {
+  .spinner { animation: spin .8s linear infinite; }
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 .suggestion-panel h3 { font-size: 14px; line-height: 1.5; font-weight: 600; margin: 16px 0 8px; }
 .suggestion-panel p { font-size: 13px; line-height: 1.7; color: var(--muted); margin: 8px 0 16px; }
 .suggestion-panel .field-note { font-size: 11px; margin-bottom: 0; }

@@ -10,6 +10,28 @@ const actionNames: Record<CoachAction, string> = {
   challenge: 'Interpretation feedback', refine_inquiry: 'Question refinement', suggest_activity: 'Rehearsal suggestion',
 }
 
+function Spinner() {
+  return <span className="spinner" aria-hidden="true" />
+}
+
+function InterpretationSource({ state, onSelect }: {
+  state: { interpretationSource: 'mine' | 'ai'; originalInterpretation: string; aiInterpretation: string }
+  onSelect: (source: 'mine' | 'ai') => void
+}) {
+  if (!state.aiInterpretation) return null
+  const usingAi = state.interpretationSource === 'ai'
+  return <div className="interpretation-source" role="group" aria-label="Active interpretation">
+    <p className="source-status"><span className="status-dot" aria-hidden="true" />
+      <strong>{usingAi ? 'Using AI interpretation.' : 'Using your interpretation.'}</strong></p>
+    <button className="secondary" onClick={() => onSelect(usingAi ? 'mine' : 'ai')}>
+      {usingAi ? 'Use my original interpretation' : 'Use AI interpretation'}</button>
+    <details className="activity-detail">
+      <summary>{usingAi ? 'View my original' : 'View AI interpretation'}</summary>
+      <p>{usingAi ? state.originalInterpretation : state.aiInterpretation}</p>
+    </details>
+  </div>
+}
+
 function Provenance({ origin, action, explain = false }: { origin: Origin; action: CoachAction; explain?: boolean }) {
   if (origin === 'gemini') return <span className="status-label">{explain ? 'AI suggestion' : 'Started from an AI suggestion'}</span>
   return <div className="demo-provenance">
@@ -211,6 +233,9 @@ export function Workspace({ onLock }: { onLock: () => void }) {
   const navigate = (step: 1 | 2 | 3) => {
     retire(); dispatch({ type: 'step', step })
   }
+  const selectInterpretation = (source: 'mine' | 'ai') => {
+    retire(); dispatch({ type: 'selectInterpretation', source })
+  }
   const requestSuggestion = async () => {
     if (active.current) return
     const abort = new AbortController()
@@ -297,9 +322,11 @@ export function Workspace({ onLock }: { onLock: () => void }) {
             <textarea id="interpretation" maxLength={2000} rows={5} value={state.educatorInterpretation}
               onChange={(event) => edit('educatorInterpretation', event.target.value)} />
             {state.draftSources.educatorInterpretation && <Provenance origin={state.draftSources.educatorInterpretation.origin} action="challenge" />}
+            {state.step === 1 && <InterpretationSource state={state} onSelect={selectInterpretation} />}
             <p className="field-note">Your interpretation stays yours, even when you accept an AI question.</p>
             {state.step !== 1 && state.confirmedInterpretation &&
-              <div className="confirmed-inquiry"><span className="eyebrow">EDUCATOR-CONFIRMED INTERPRETATION</span><p>{state.confirmedInterpretation}</p></div>}
+              <div className="confirmed-inquiry"><span className="eyebrow">EDUCATOR-CONFIRMED INTERPRETATION</span><p>{state.confirmedInterpretation}</p>
+                <InterpretationSource state={state} onSelect={selectInterpretation} /></div>}
             {state.step !== 1 && <>
               <div className="field-heading"><label htmlFor="inquiry">Your PLC Question</label>
                 <span className="status-label">{state.confirmedInquiry && !inquiryChanged ? 'Educator confirmed' : 'Your draft'}</span></div>
@@ -316,7 +343,10 @@ export function Workspace({ onLock }: { onLock: () => void }) {
               </button>
                 <button className="secondary" onClick={useGuide} disabled={state.supportBlocked}>Use guided planning</button></div>
               <p className="field-note">AI runs only when you ask. Accepting copies a suggestion into a draft.</p>
-              {busy && <button className="secondary" onClick={stop}>Cancel request</button>}
+              {busy && <div className="request-loading">
+                <p className="loading-indicator"><Spinner /><span>Reviewing the evidence…</span></p>
+                <button className="secondary" onClick={stop}>Cancel request</button>
+              </div>}
             </div>
             {state.step === 1 && <button className="secondary confirm-button" disabled={!state.educatorInterpretation.trim() || busy || !!state.pending}
               onClick={() => dispatch({ type: state.challengeDecided ? 'confirmInterpretation' : 'continueWithoutChallenge' })}>
@@ -347,15 +377,16 @@ export function Workspace({ onLock }: { onLock: () => void }) {
             <div className="ai-panel-heading"><div><span className="eyebrow">{state.pending ? 'For your review / Not confirmed' : 'Optional assistance'}</span>
               <h2 id="suggestion-title" ref={feedback} tabIndex={-1}>{state.pending ? actionNames[currentAction] : 'Planning support'}</h2></div></div>
             <p className="sr-only" role="status">{state.guide && !busy && !state.pending ? 'Guided planning is ready. Your draft is unchanged.' : ''}</p>
-            {busy ? <div className="empty-state" role="status">
-              <h3>Considering the evidence…</h3><p>Your work stays in place while the suggestion is prepared.</p></div>
+            {busy ? <div className="empty-state loading-state" role="status" aria-live="polite">
+              <h3><Spinner />Reviewing the evidence…</h3><p>Your interpretation and submitted evidence stay in place while the suggestion is prepared.</p></div>
               : state.pending ? <>
                 <Provenance origin={state.pending.origin} action={state.pending.suggestion.action} explain />
                 <p>{state.pending.origin === 'demo' ? 'Built-in example ready for review.' : 'AI suggestion ready for review.'}</p>
                 <SuggestionContent suggestion={state.pending.suggestion} />
-                <h3 className="small-heading">Why investigate this?</h3><p>{state.pending.suggestion.rationale}</p>
                 <Sources ids={state.pending.suggestion.sourceIds} />
-                <div className="uncertainty"><h3>Uncertainty & limits</h3><p>{state.pending.suggestion.limitations}</p></div>
+                <div className="uncertainty"><h3>Uncertainty &amp; limits</h3><p>{state.pending.suggestion.limitations}</p></div>
+                <details className="activity-detail more-detail"><summary>More detail</summary>
+                  <h3 className="small-heading">Why investigate this?</h3><p>{state.pending.suggestion.rationale}</p></details>
                 <div className="decision-buttons">
                   <button className="primary" onClick={() => dispatch({ type: 'decide', choice: 'accepted', at: new Date().toISOString() })}>Accept suggestion</button>
                   <button className="secondary" onClick={() => dispatch({ type: 'decide', choice: 'rejected', at: new Date().toISOString() })}>Reject suggestion</button>
