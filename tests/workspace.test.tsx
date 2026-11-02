@@ -464,7 +464,7 @@ describe('Workspace interaction and provider-idle boundaries', () => {
     expect((button as HTMLButtonElement).disabled).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const requestId = JSON.parse(fetchMock.mock.calls[0][1].body).requestId
-    await act(async () => { finish?.({ ok: true, json: async () => ({ id: crypto.randomUUID(), requestId, suggestion: challenge }) }) })
+    await act(async () => { finish?.({ ok: true, json: async () => ({ id: crypto.randomUUID(), requestId, model: 'gemini-2.5-flash', suggestion: challenge }) }) })
     expect(screen.queryByText('Reviewing the evidence…')).toBeNull()
     expect(await screen.findByRole('button', { name: 'Accept suggestion' })).toBeTruthy()
   })
