@@ -10,7 +10,7 @@ A focused demo of the **Value Add of Technology on Teaching (VATT)** principle: 
 2. **Suggest a stronger PLC question** uses only the confirmed interpretation and current educator-authored question. Accept copies one focused question into the editable draft; Reject leaves it unchanged. **Confirm inquiry** is another independent action.
 3. **Suggest a PLC activity** uses only the confirmed inquiry and approved evidence to suggest one 15-minute math rehearsal with two discussion prompts, teacher practice, and possible student evidence to examine. Accept copies it into an editable preview; Reject preserves educator work. **Confirm activity** means choosing to bring this rehearsal to discussion. Changing the confirmed inquiry marks an accepted activity **Needs review**.
 
-AI runs only on a button click. Errors never automatically replace educator work. Sources, uncertainty, response history, and decisions are visible. State is ephemeral React memory: refresh, lock, or reset clears drafts; no database, local storage, analytics, or student accounts.
+AI runs only on a button click. Errors never automatically replace educator work. Each AI suggestion is explicitly labeled as a **live model call**, naming the model that generated it in real time, so the genuine provider call is visible rather than implied. Sources, uncertainty, response history, and decisions are visible. State is ephemeral React memory: refresh, lock, or reset clears drafts; no database, local storage, analytics, or student accounts.
 
 ### Guided planning
 

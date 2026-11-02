@@ -67,5 +67,5 @@ export type CoachAction = Suggestion['action']
 export type Activity = z.infer<typeof activitySchema>['activity']
 
 export const coachResponseSchema = z.object({
-  id: z.uuid(), requestId: z.uuid(), suggestion: suggestionSchema,
+  id: z.uuid(), requestId: z.uuid(), model: z.string().trim().min(1).max(100), suggestion: suggestionSchema,
 }).strict()

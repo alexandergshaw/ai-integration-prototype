@@ -3,7 +3,7 @@ import { sourceIds, workspaceScenario } from '../../../shared/evidence'
 import { demoExample, matchesExampleScenario, type ExampleScenario } from '../../../shared/demoExamples'
 
 export type Origin = 'gemini' | 'demo'
-type SuggestionRecord = { id: string; suggestion: Suggestion; origin: Origin }
+type SuggestionRecord = { id: string; suggestion: Suggestion; origin: Origin; model?: string }
 type FailedRequest = { id: string; action: CoachAction; snapshot: CoachRequest; step: State['step'] }
 
 export type Decision = {
@@ -13,6 +13,7 @@ export type Decision = {
   at: string
   appliedToDraft: boolean
   origin: Origin
+  model?: string
 }
 export type InterpretationSource = 'mine' | 'ai'
 export type State = {
@@ -75,7 +76,7 @@ type Event =
   | { type: 'edit'; field: 'educatorInterpretation' | 'inquiryDraft' | 'activityDraft'; value: string }
   | { type: 'step'; step: State['step'] }
   | { type: 'start'; id: string; action: CoachAction }
-  | { type: 'received'; requestId: string; id: string; suggestion: Suggestion; at: string }
+  | { type: 'received'; requestId: string; id: string; suggestion: Suggestion; model: string; at: string }
   | { type: 'error'; requestId: string; message: string; eligible?: boolean }
   | { type: 'guide'; outcome?: 'guided_activation' | 'ui_deadline'; requestId?: string }
   | { type: 'demo'; failedRequestId: string; id: string; at: string }
@@ -129,10 +130,10 @@ function transition(state: State, event: Event): State {
     case 'received':
       if (state.request?.id !== event.requestId || state.request.action !== event.suggestion.action) return state
       return {
-        ...state, guide: false, outcome: 'ai_success', request: null, fallback: null, pending: { id: event.id, suggestion: event.suggestion, origin: 'gemini' },
+        ...state, guide: false, outcome: 'ai_success', request: null, fallback: null, pending: { id: event.id, suggestion: event.suggestion, origin: 'gemini', model: event.model },
         decisions: [...state.decisions, {
           id: event.id, suggestion: event.suggestion, at: event.at,
-          choice: 'awaiting decision', appliedToDraft: false, origin: 'gemini',
+          choice: 'awaiting decision', appliedToDraft: false, origin: 'gemini', model: event.model,
         }],
       }
     case 'error':

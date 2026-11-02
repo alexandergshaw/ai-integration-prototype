@@ -49,7 +49,8 @@ describe('Gemini SDK wire contract', () => {
       })
 
       await expect(generateSuggestion(requestFor(action))).resolves.toMatchObject({
-        action,
+        model: 'gemini-2.5-flash',
+        suggestion: { action },
       })
       expect(calls).toHaveLength(1)
       const [{ url, body }] = calls
