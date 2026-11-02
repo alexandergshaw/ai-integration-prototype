@@ -62,6 +62,14 @@ function PlanningGuide({ action, onExample, examplesAvailable }: {
   </div>
 }
 
+function LiveModelCallout({ model }: { model?: string }) {
+  if (!model) return null
+  return <p className="live-model-callout">
+    <span className="live-dot" aria-hidden="true" />
+    Live model call · generated in real time by <strong>{model}</strong>
+  </p>
+}
+
 function Sources({ ids }: { ids: string[] }) {
   return <div className="source-links" aria-label="Suggestion sources">{ids.map((id) =>
     <a key={id} href={`#source-${id}`} onClick={() => {
@@ -241,7 +249,7 @@ export function Workspace({ onLock }: { onLock: () => void }) {
       }
       const suggestion = validateSuggestion(parsed.suggestion, currentAction)
       if (active.current?.id !== id) return
-      dispatch({ type: 'received', requestId: id, id: parsed.id, suggestion, at: new Date().toISOString() })
+      dispatch({ type: 'received', requestId: id, id: parsed.id, suggestion, model: parsed.model, at: new Date().toISOString() })
     } catch {
       if (active.current?.id !== id) return
       dispatch({ type: 'error', requestId: id, eligible: true, message: '' })
@@ -352,6 +360,7 @@ export function Workspace({ onLock }: { onLock: () => void }) {
               : state.pending ? <>
                 <Provenance origin={state.pending.origin} action={state.pending.suggestion.action} explain />
                 <p>{state.pending.origin === 'demo' ? 'Built-in example ready for review.' : 'AI suggestion ready for review.'}</p>
+                <LiveModelCallout model={state.pending.origin === 'gemini' ? state.pending.model : undefined} />
                 <SuggestionContent suggestion={state.pending.suggestion} />
                 <h3 className="small-heading">Why investigate this?</h3><p>{state.pending.suggestion.rationale}</p>
                 <Sources ids={state.pending.suggestion.sourceIds} />
@@ -384,6 +393,7 @@ export function Workspace({ onLock }: { onLock: () => void }) {
                   <span className="status-label">{decision.origin === 'demo' ? 'Built-in example' : 'AI suggestion'}</span>
                 </summary>
                 {decision.origin === 'demo' && <p>Prepared scenario: {demoScenario[decision.suggestion.action]}</p>}
+                {decision.origin === 'gemini' && <LiveModelCallout model={decision.model} />}
                 <time dateTime={decision.at}>{new Date(decision.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
                 <p>{decision.appliedToDraft ? 'Copied to an editable draft. Separate confirmation required.'
                   : 'Not copied. Educator work preserved; not used as later request context.'}</p>

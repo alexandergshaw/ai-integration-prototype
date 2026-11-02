@@ -8,7 +8,7 @@ import type { CoachAction } from '../shared/schemas'
 const requestId = '11111111-1111-4111-8111-111111111111'
 function receive(state: State, suggestion: Suggestion) {
   const started = reducer(state, { type: 'start', id: requestId, action: suggestion.action })
-  return reducer(started, { type: 'received', id: crypto.randomUUID(), requestId, suggestion, at: '2026-11-01T12:00:00Z' })
+  return reducer(started, { type: 'received', id: crypto.randomUUID(), requestId, suggestion, model: 'gemini-2.5-flash', at: '2026-11-01T12:00:00Z' })
 }
 function decide(state: State, choice: 'accepted' | 'rejected') {
   return reducer(state, { type: 'decide', choice, at: '2026-11-01T12:01:00Z' })
@@ -131,7 +131,7 @@ describe('Confirmation and stale-response boundaries', () => {
       const state = useDemo(failed())
       expect(useDemo(state)).toBe(state)
       expect(state.decisions).toHaveLength(1)
-      expect(reducer(state, { type: 'received', requestId, id: crypto.randomUUID(), suggestion: challenge, at: '' })).toBe(state)
+      expect(reducer(state, { type: 'received', requestId, id: crypto.randomUUID(), suggestion: challenge, model: 'gemini-2.5-flash', at: '' })).toBe(state)
       expect(reducer(state, { type: 'error', requestId, message: 'Late failure', eligible: true })).toBe(state)
       const next = useDemo(failed(decide(state, 'rejected')))
       expect(next.pending?.id).not.toBe(state.pending?.id)
@@ -260,7 +260,7 @@ describe('Confirmation and stale-response boundaries', () => {
     state = reducer(state, { type: 'edit', field: 'educatorInterpretation', value: 'A different hypothesis' })
     expect(state.pending).toBeNull()
     expect(state.decisions[0].choice).toBe('not applied')
-    expect(reducer(state, { type: 'received', requestId, id: crypto.randomUUID(), suggestion: challenge, at: '' })).toEqual(state)
+    expect(reducer(state, { type: 'received', requestId, id: crypto.randomUUID(), suggestion: challenge, model: 'gemini-2.5-flash', at: '' })).toEqual(state)
   })
   it('editing activity clears confirmation and reset clears session state', () => {
     const confirmed = reducer(decide(receive(confirmedState, rehearsal), 'accepted'), { type: 'confirmActivity' })

@@ -276,5 +276,5 @@ export async function generateSuggestion(request: CoachRequest) {
       { validationIssues: [{ code: 'custom', path: ['sourceIds'] }] },
     )
   }
-  return parsed.data
+  return { suggestion: parsed.data, model }
 }

@@ -15,7 +15,7 @@ function providerFailure(status = 502) {
 function modelResponse(suggestion: Suggestion) {
   fetchMock.mockImplementationOnce(async (_url, options) => ({
     ok: true, status: 200,
-    json: async () => ({ id: crypto.randomUUID(), requestId: JSON.parse(options.body).requestId, suggestion }),
+    json: async () => ({ id: crypto.randomUUID(), requestId: JSON.parse(options.body).requestId, model: 'gemini-2.5-flash', suggestion }),
   }))
 }
 beforeEach(() => {
@@ -73,6 +73,19 @@ describe('Workspace interaction and provider-idle boundaries', () => {
     expect(payload.educatorInterpretation).toBe('Perhaps explanation language is a barrier.')
     expect(payload.sourceIds).toHaveLength(4)
     expect(Object.keys(payload).sort()).toEqual(['action', 'educatorInterpretation', 'requestId', 'sourceIds'])
+  })
+
+  it('explicitly calls out the live model call that produced an AI suggestion', async () => {
+    const user = userEvent.setup()
+    render(<Workspace onLock={() => {}} />)
+    modelResponse(challenge)
+    await user.click(screen.getByRole('button', { name: 'Challenge my interpretation' }))
+    expect(await screen.findByRole('button', { name: 'Accept suggestion' })).toBeTruthy()
+    const callouts = screen.getAllByText(/Live model call/)
+    expect(callouts.length).toBeGreaterThan(0)
+    expect(callouts[0].textContent).toContain('gemini-2.5-flash')
+    await user.click(screen.getByRole('button', { name: 'Reject suggestion' }))
+    expect(screen.getByText(/Live model call/).textContent).toContain('gemini-2.5-flash')
   })
 
   it('preserves educator work on Reject and requires separate confirmation through each step', async () => {
@@ -250,7 +263,7 @@ describe('Workspace interaction and provider-idle boundaries', () => {
       ok: true, status: 200, json: async () => {
         if (kind === 'malformed-success') throw new SyntaxError('private output')
         if (kind === 'empty-success') return null
-        return { id: crypto.randomUUID(), requestId: crypto.randomUUID(), suggestion: challenge }
+        return { id: crypto.randomUUID(), requestId: crypto.randomUUID(), model: 'gemini-2.5-flash', suggestion: challenge }
       },
     }))
     render(<Workspace onLock={() => {}} />)
@@ -290,7 +303,7 @@ describe('Workspace interaction and provider-idle boundaries', () => {
     expect(document.querySelector('.service-details')).toBeNull()
     const requestId = JSON.parse(fetchMock.mock.calls[0][1].body).requestId
     await act(async () => {
-      finish?.({ ok: true, json: async () => ({ id: crypto.randomUUID(), requestId, suggestion: challenge }) })
+      finish?.({ ok: true, json: async () => ({ id: crypto.randomUUID(), requestId, model: 'gemini-2.5-flash', suggestion: challenge }) })
       await vi.advanceTimersByTimeAsync(8_000)
     })
     expect((screen.getByLabelText('Your Interpretation') as HTMLTextAreaElement).value).toBe(draft)
@@ -383,7 +396,7 @@ describe('Workspace interaction and provider-idle boundaries', () => {
     expect(screen.getByText('Guided planning is ready. Your draft is unchanged.')).toBeTruthy()
     const requestId = JSON.parse(fetchMock.mock.calls[0][1].body).requestId
     await act(async () => {
-      finish?.({ ok: true, json: async () => ({ id: crypto.randomUUID(), requestId, suggestion: challenge }) })
+      finish?.({ ok: true, json: async () => ({ id: crypto.randomUUID(), requestId, model: 'gemini-2.5-flash', suggestion: challenge }) })
     })
     expect((screen.getByLabelText('Your Interpretation') as HTMLTextAreaElement).value).toBe(text)
     expect(screen.getByRole('heading', { name: 'Your decision trail 0' })).toBeTruthy()
@@ -397,7 +410,7 @@ describe('Workspace interaction and provider-idle boundaries', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Challenge my interpretation' }))
     fireEvent.change(screen.getByLabelText('Your Interpretation'), { target: { value: 'Edited after request start.' } })
     const requestId = JSON.parse(fetchMock.mock.calls[0][1].body).requestId
-    await act(async () => { finish?.({ ok: true, json: async () => ({ id: crypto.randomUUID(), requestId, suggestion: challenge }) }) })
+    await act(async () => { finish?.({ ok: true, json: async () => ({ id: crypto.randomUUID(), requestId, model: 'gemini-2.5-flash', suggestion: challenge }) }) })
     expect((screen.getByLabelText('Your Interpretation') as HTMLTextAreaElement).value).toBe('Edited after request start.')
     expect(screen.queryByRole('button', { name: 'Accept suggestion' })).toBeNull()
   })
@@ -430,7 +443,7 @@ describe('Workspace interaction and provider-idle boundaries', () => {
       }
       const requestId = JSON.parse(fetchMock.mock.calls[0][1].body).requestId
       await act(async () => {
-        finish?.({ ok: true, json: async () => ({ id: crypto.randomUUID(), requestId, suggestion: transition === 'navigation' ? refinement : challenge }) })
+        finish?.({ ok: true, json: async () => ({ id: crypto.randomUUID(), requestId, model: 'gemini-2.5-flash', suggestion: transition === 'navigation' ? refinement : challenge }) })
       })
       expect(screen.queryByRole('button', { name: 'Accept suggestion' })).toBeNull()
       if (transition === 'reset') expect((screen.getByLabelText('Your Interpretation') as HTMLTextAreaElement).value).toBe(initialState.educatorInterpretation)
