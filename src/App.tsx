@@ -142,7 +142,7 @@ function SuggestionContent({ suggestion }: { suggestion: Suggestion }) {
   if (suggestion.action === 'challenge') return <>
     <h3>Documented evidence to consider</h3>
     <p>{suggestion.evidenceConsideration}</p>
-    <h3>A possible explanation—not established</h3>
+    <h3>An opposing reading to consider—not established</h3>
     <p>{suggestion.alternativeHypothesis}</p>
     <div className="proposed"><span className="eyebrow">PROBING QUESTION</span><p>{suggestion.probingQuestion}</p></div>
     <div className="proposed"><span className="eyebrow">REVISED INTERPRETATION DRAFT</span><p>{suggestion.revisedInterpretation}</p></div>
@@ -434,7 +434,7 @@ export function Workspace({ onLock }: { onLock: () => void }) {
                     ? decision.suggestion.revisedInterpretation : decision.suggestion.suggestedInquiry}</p>
                 {decision.suggestion.action === 'challenge' && <p>
                   Documented evidence: {decision.suggestion.evidenceConsideration}<br />
-                  Possible explanation: {decision.suggestion.alternativeHypothesis}<br />
+                  Opposing reading: {decision.suggestion.alternativeHypothesis}<br />
                   {decision.suggestion.probingQuestion}
                 </p>}
                 <p>{decision.suggestion.rationale}</p><p>Limits: {decision.suggestion.limitations}</p>
