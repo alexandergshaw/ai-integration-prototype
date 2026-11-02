@@ -1,9 +1,10 @@
-import { useEffect, useReducer, useRef, useState } from 'react'
+import { useEffect, useId, useReducer, useRef, useState, type ReactNode } from 'react'
 import { evidence, learningGoal, sourceIds } from '../shared/evidence'
 import { demoScenario, matchesExampleScenario, validateSuggestion } from '../shared/demoExamples'
 import { coachResponseSchema, type CoachAction, type Suggestion } from '../shared/schemas'
 import { formatActivity, initialState, reducer, requestFor, type Origin } from './features/ai-decision/state'
 import { classifyResponse, GUIDED_PLANNING_WAIT_MS } from './features/ai-decision/failure'
+import { useRevealHighlight } from './features/ai-decision/useRevealHighlight'
 import './App.css'
 
 const actionNames: Record<CoachAction, string> = {
@@ -12,6 +13,28 @@ const actionNames: Record<CoachAction, string> = {
 
 function Spinner() {
   return <span className="spinner" aria-hidden="true" />
+}
+
+function InfoTip({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const id = useId()
+  const wrap = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    const onPointer = (event: PointerEvent) => {
+      if (wrap.current && !wrap.current.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onPointer)
+    return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('pointerdown', onPointer) }
+  }, [open])
+  return <span className="info-tip" ref={wrap} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+    <button type="button" className="info-tip-trigger" aria-label={label} aria-expanded={open}
+      aria-describedby={open ? id : undefined} onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
+      onClick={() => setOpen(true)}>i</button>
+    {open && <span role="tooltip" id={id} className="info-tip-bubble">{children}</span>}
+  </span>
 }
 
 function InterpretationSource({ state, onSelect }: {
@@ -43,8 +66,8 @@ function Provenance({ origin, action, explain = false }: { origin: Origin; actio
   </div>
 }
 
-function PlanningGuide({ action, onExample, examplesAvailable }: {
-  action: CoachAction; onExample: () => void; examplesAvailable: boolean
+function PlanningGuide({ action, onExample, examplesAvailable, onNavigate }: {
+  action: CoachAction; onExample: () => void; examplesAvailable: boolean; onNavigate: (id: string) => void
 }) {
   return <div className="planning-guide">
     <span className="status-label">Built-in guide</span>
@@ -73,7 +96,7 @@ function PlanningGuide({ action, onExample, examplesAvailable }: {
         <li><b>5 min</b><span>Compare interpretations and identify subsequent evidence.</span></li></ol>
       <p>In Activity preview, name the instructional objective, two mathematical discussion questions, what teachers will practice, and what student evidence to examine afterward.</p>
     </>}
-    <Sources ids={[...sourceIds]} />
+    <Sources ids={[...sourceIds]} onNavigate={onNavigate} />
     <details className="activity-detail"><summary>About this support</summary>
       <p>These built-in prompts support your reasoning without generating an analysis of your draft.</p>
     </details>
@@ -92,9 +115,14 @@ function LiveModelCallout({ model }: { model?: string }) {
   </p>
 }
 
-function Sources({ ids }: { ids: string[] }) {
+function Sources({ ids, onNavigate }: { ids: string[]; onNavigate?: (id: string) => void }) {
   return <div className="source-links" aria-label="Suggestion sources">{ids.map((id) =>
-    <a key={id} href={`#source-${id}`} onClick={() => {
+    <a key={id} href={`#source-${id}`} onClick={(event) => {
+      if (onNavigate) {
+        event.preventDefault()
+        onNavigate(id)
+        return
+      }
       const disclosure = document.getElementById('evidence-disclosure') as HTMLDetailsElement | null
       if (disclosure) disclosure.open = true
       window.setTimeout(() => document.getElementById(`source-${id}`)?.focus(), 0)
@@ -118,7 +146,9 @@ function EvidenceRail() {
         </div>
       </div>
       <section id={`source-${evidence[0].id}`} tabIndex={-1} className="assessment-source">
-        <h3>{evidence[0].title}</h3>
+        <h3>{evidence[0].title} <InfoTip label="About these rubric measures">
+          Correct products and adequate explanations are scored on separate hypothetical rubrics. The overlap between the two groups is unknown, so one measure does not explain the other.
+        </InfoTip></h3>
         <p className="source-meta">October 28, 2026<br />{evidence[0].scope} · Demo-visible</p>
         <div className="metrics">
           <div><strong>71<span>%</span></strong><b>68/96</b><span>Correct products</span></div>
@@ -214,6 +244,10 @@ export function Workspace({ onLock }: { onLock: () => void }) {
   const [state, dispatch] = useReducer(reducer, initialState)
   const active = useRef<{ id: string; controller: AbortController; timer: number } | null>(null)
   const feedback = useRef<HTMLHeadingElement>(null)
+  const { targetRef, reveal, announce, announcement } = useRevealHighlight()
+  const fieldName: Record<CoachAction, 'interpretation' | 'inquiry' | 'activity'> = {
+    challenge: 'interpretation', refine_inquiry: 'inquiry', suggest_activity: 'activity',
+  }
   const retire = (id?: string) => {
     const request = active.current
     if (!request || id && request.id !== id) return
@@ -230,10 +264,17 @@ export function Workspace({ onLock }: { onLock: () => void }) {
   const busy = !!state.request
   const inquiryChanged = !!state.confirmedInquiry && state.inquiryDraft.trim() !== state.confirmedInquiry
   const currentAction: CoachAction = state.step === 1 ? 'challenge' : state.step === 2 ? 'refine_inquiry' : 'suggest_activity'
+  const navigateToSource = (id: string) => {
+    const disclosure = document.getElementById('evidence-disclosure') as HTMLDetailsElement | null
+    if (disclosure) disclosure.open = true
+    if (typeof history !== 'undefined' && history.pushState) history.pushState(null, '', `#source-${id}`)
+    reveal(`source-${id}`, { focus: true, block: 'center' })
+  }
   const stop = () => { retire(); dispatch({ type: 'cancel' }) }
   const useGuide = () => {
     retire(); dispatch({ type: 'guide' })
     feedback.current?.focus({ preventScroll: true })
+    reveal('suggestion-panel', { highlight: true, block: 'start' })
   }
   const edit = (field: 'educatorInterpretation' | 'inquiryDraft' | 'activityDraft', value: string) => {
     retire(); dispatch({ type: 'edit', field, value })
@@ -244,6 +285,33 @@ export function Workspace({ onLock }: { onLock: () => void }) {
   const selectInterpretation = (source: 'mine' | 'ai') => {
     retire(); dispatch({ type: 'selectInterpretation', source })
   }
+  const decide = (choice: 'accepted' | 'rejected') => {
+    const action = state.pending?.suggestion.action
+    dispatch({ type: 'decide', choice, at: new Date().toISOString() })
+    if (!action) return
+    if (choice === 'accepted') {
+      reveal(fieldName[action], { focus: true, block: 'center' })
+      announce('Suggestion added to your editable draft. Review it before confirming.')
+    } else {
+      const owned = action === 'challenge' ? 'interpretation' : action === 'refine_inquiry' ? 'question' : 'activity'
+      announce(`Suggestion rejected. Your ${owned} is unchanged.`)
+    }
+  }
+  const confirmStep1 = () => {
+    dispatch({ type: state.challengeDecided ? 'confirmInterpretation' : 'continueWithoutChallenge' })
+    reveal('inquiry', { focus: true, block: 'center' })
+    announce('Interpretation confirmed. Draft or refine your PLC question next.')
+  }
+  const confirmInquiry = () => {
+    dispatch({ type: 'confirmInquiry' })
+    reveal('activity', { focus: true, block: 'center' })
+    announce('Inquiry confirmed. Plan your 15-minute rehearsal next.')
+  }
+  const confirmActivity = () => {
+    dispatch({ type: 'confirmActivity' })
+    reveal('activity', { highlight: true, block: 'center' })
+    announce('Activity confirmed. You can refine any step or revisit your inquiry.')
+  }
   const requestSuggestion = async () => {
     if (active.current) return
     const abort = new AbortController()
@@ -252,6 +320,7 @@ export function Workspace({ onLock }: { onLock: () => void }) {
     const timer = window.setTimeout(() => {
       retire(id)
       dispatch({ type: 'guide', outcome: 'ui_deadline', requestId: id })
+      reveal('suggestion-panel', { highlight: true, block: 'start' })
     }, GUIDED_PLANNING_WAIT_MS)
     active.current = { id, controller: abort, timer }
     try {
@@ -266,6 +335,7 @@ export function Workspace({ onLock }: { onLock: () => void }) {
         const failure = classifyResponse(response.status, body)
         dispatch({ type: 'error', requestId: id, eligible: failure.kind === 'recoverable',
           message: failure.kind === 'application' ? failure.message : '' })
+        if (failure.kind === 'recoverable') reveal('suggestion-panel', { highlight: true, block: 'start' })
         return
       }
       const parsed = coachResponseSchema.parse(body)
@@ -275,9 +345,12 @@ export function Workspace({ onLock }: { onLock: () => void }) {
       const suggestion = validateSuggestion(parsed.suggestion, currentAction)
       if (active.current?.id !== id) return
       dispatch({ type: 'received', requestId: id, id: parsed.id, suggestion, model: parsed.model, at: new Date().toISOString() })
+      reveal('suggestion-panel', { highlight: true, block: 'start' })
+      announce('New feedback is ready to review. Your draft is unchanged until you accept it.')
     } catch {
       if (active.current?.id !== id) return
       dispatch({ type: 'error', requestId: id, eligible: true, message: '' })
+      reveal('suggestion-panel', { highlight: true, block: 'start' })
     } finally { retire(id) }
   }
 
@@ -308,37 +381,68 @@ export function Workspace({ onLock }: { onLock: () => void }) {
       </div>
     </header>
     <main id="workspace" className="workspace">
+      <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
       <div className="workspace-heading">
         <h1>AI Coaching Workspace</h1>
-        <p>Examine evidence, shape an inquiry, and plan a rehearsal. You decide what to keep.</p></div>
+        <p>Examine evidence, shape an inquiry, and plan a rehearsal. You decide what to keep.</p>
+        <details className="how-it-works">
+          <summary>How this works</summary>
+          <ol className="how-it-works-steps">
+            <li>Examine the fictional evidence.</li>
+            <li>Write your own interpretation.</li>
+            <li>Optionally request an AI challenge or use guided planning.</li>
+            <li>Accept, reject, or keep your work—your decision.</li>
+            <li>Confirm an interpretation, then a PLC inquiry.</li>
+            <li>Draft and confirm a short rehearsal.</li>
+          </ol>
+          <p>AI runs only when you ask and never confirms anything for you. You control every final decision.</p>
+        </details></div>
       <div className="workspace-grid">
         <EvidenceRail />
         <section className="educator-panel" aria-label="Educator workspace">
           <nav className="stepper" aria-label="Coaching steps">{(['Challenge', 'Refine', 'Rehearse'] as const).map((name, index) =>
             <button key={name} aria-current={state.step === index + 1 ? 'step' : undefined}
+              title={index === 1 && (!state.challengeDecided || !state.confirmedInterpretation ||
+                state.educatorInterpretation.trim() !== state.confirmedInterpretation) ? 'Confirm your interpretation to unlock this step.'
+                : index === 2 && (!state.confirmedInquiry || inquiryChanged) ? 'Confirm your inquiry to unlock this step.' : undefined}
               disabled={index === 1 && (!state.challengeDecided || !state.confirmedInterpretation ||
                 state.educatorInterpretation.trim() !== state.confirmedInterpretation) ||
                 index === 2 && (!state.confirmedInquiry || inquiryChanged)}
               onClick={() => navigate((index + 1) as 1 | 2 | 3)}><span>{index + 1}</span>{name}</button>)}</nav>
+          <p className="step-hint" role="note">{state.step === 1
+            ? (state.challengeDecided ? 'Next: confirm your interpretation to unlock Refine.'
+              : 'Next: continue with your interpretation to unlock Refine. Requesting an AI challenge is optional.')
+            : state.step === 2
+              ? (inquiryChanged ? 'Next: confirm your changed inquiry to unlock Rehearse.' : 'Next: confirm your inquiry to unlock Rehearse.')
+              : (state.confirmedActivity ? 'Activity confirmed. Refine any step or revisit your inquiry anytime.'
+                : 'Next: confirm your activity once it aligns with your confirmed inquiry.')}</p>
           <div className="editor-content">
             <span className="status-label">Your draft</span>
             <h2>{state.step === 1 ? 'Interpret the evidence' : state.step === 2 ? 'Draft an inquiry' : 'Plan a rehearsal'}</h2>
             <p className="section-intro">{state.step === 1 ? 'What might the student work be telling us? Hold your interpretation as a hypothesis, not a finding.'
               : state.step === 2 ? 'Refine or keep your question. Only your separate confirmation makes it authoritative.'
                 : 'Rehearse one mathematical idea in 15 minutes. The PLC still decides its classroom strategy.'}</p>
-            <label htmlFor="interpretation">Your Interpretation</label>
-            <textarea id="interpretation" maxLength={2000} rows={5} value={state.educatorInterpretation}
+            <div className="label-with-tip"><label htmlFor="interpretation">Your Interpretation</label>
+              <InfoTip label="About Your Interpretation">
+                Your explanation of what the student evidence may suggest. You can revise it at any time.
+              </InfoTip></div>
+            <textarea id="interpretation" ref={targetRef('interpretation')} maxLength={2000} rows={5} value={state.educatorInterpretation}
               onChange={(event) => edit('educatorInterpretation', event.target.value)} />
             {state.draftSources.educatorInterpretation && <Provenance origin={state.draftSources.educatorInterpretation.origin} action="challenge" />}
             {state.step === 1 && <InterpretationSource state={state} onSelect={selectInterpretation} />}
             <p className="field-note">Your interpretation stays yours, even when you accept an AI question.</p>
             {state.step !== 1 && state.confirmedInterpretation &&
-              <div className="confirmed-inquiry"><span className="eyebrow">EDUCATOR-CONFIRMED INTERPRETATION</span><p>{state.confirmedInterpretation}</p>
+              <div className="confirmed-inquiry"><span className="eyebrow">EDUCATOR-CONFIRMED INTERPRETATION <InfoTip label="About the confirmed interpretation">
+                The explanation you've chosen to use for planning. AI suggestions do not confirm it automatically.
+              </InfoTip></span><p>{state.confirmedInterpretation}</p>
                 <InterpretationSource state={state} onSelect={selectInterpretation} /></div>}
             {state.step !== 1 && <>
-              <div className="field-heading"><label htmlFor="inquiry">Your PLC Question</label>
+              <div className="field-heading"><div className="label-with-tip"><label htmlFor="inquiry">Your PLC Question</label>
+                <InfoTip label="About your PLC question">
+                  The question your team will investigate. Only your separate confirmation makes it authoritative.
+                </InfoTip></div>
                 <span className="status-label">{state.confirmedInquiry && !inquiryChanged ? 'Educator confirmed' : 'Your draft'}</span></div>
-              <textarea id="inquiry" maxLength={2000} rows={4} value={state.inquiryDraft}
+              <textarea id="inquiry" ref={targetRef('inquiry')} maxLength={2000} rows={4} value={state.inquiryDraft}
                 onChange={(event) => edit('inquiryDraft', event.target.value)} />
               {state.draftSources.inquiryDraft && <Provenance origin={state.draftSources.inquiryDraft.origin} action="refine_inquiry" />}
               {inquiryChanged && <p className="notice">Unconfirmed edits. Confirm your changed inquiry before requesting a rehearsal.</p>}
@@ -349,7 +453,10 @@ export function Workspace({ onLock }: { onLock: () => void }) {
                 {state.guide ? 'Try AI' : state.step === 1 ? state.challengeDecided ? 'Try another challenge' : 'Challenge my interpretation'
                   : state.step === 2 ? 'Suggest a stronger PLC question' : 'Suggest a PLC activity'}
               </button>
-                <button className="secondary" onClick={useGuide} disabled={state.supportBlocked}>Use guided planning</button></div>
+                <button className="secondary" onClick={useGuide} disabled={state.supportBlocked}>Use guided planning</button>
+                <InfoTip label="About guided planning">
+                  Use structured questions to develop your plan without requesting a new AI suggestion.
+                </InfoTip></div>
               <p className="field-note">AI runs only when you ask. Accepting copies a suggestion into a draft.</p>
               {busy && <div className="request-loading">
                 <p className="loading-indicator"><Spinner /><span>Reviewing the evidence…</span></p>
@@ -357,31 +464,31 @@ export function Workspace({ onLock }: { onLock: () => void }) {
               </div>}
             </div>
             {state.step === 1 && <button className="secondary confirm-button" disabled={!state.educatorInterpretation.trim() || busy || !!state.pending}
-              onClick={() => dispatch({ type: state.challengeDecided ? 'confirmInterpretation' : 'continueWithoutChallenge' })}>
+              onClick={confirmStep1}>
               {state.challengeDecided ? 'Confirm interpretation and continue →' : 'Continue with my interpretation →'}
             </button>}
             {state.step === 2 && <button className="secondary confirm-button" disabled={!state.inquiryDraft.trim() || busy || !!state.pending}
-              onClick={() => dispatch({ type: 'confirmInquiry' })}>Confirm inquiry →</button>}
+              onClick={confirmInquiry}>Confirm inquiry →</button>}
             {state.step === 2 && state.decisions.at(-1)?.suggestion.action === 'challenge' && state.decisions.at(-1)?.choice === 'rejected' &&
               <p className="notice">Continue with my interpretation: your original question is unchanged. Refinement is optional.</p>}
             {state.step === 3 && <>
               <div className="confirmed-inquiry"><span className="eyebrow">EDUCATOR CONFIRMED · REQUEST CONTEXT</span><p>{state.confirmedInquiry}</p></div>
               <div className="field-heading"><label htmlFor="activity">Activity preview</label><span className="status-label">
                 {state.activityNeedsReview ? 'Needs review' : state.confirmedActivity ? 'Educator confirmed' : 'Your draft / Needs confirmation'}</span></div>
-              <textarea id="activity" maxLength={12000} rows={8} value={state.activityDraft}
+              <textarea id="activity" ref={targetRef('activity')} maxLength={12000} rows={8} value={state.activityDraft}
                 placeholder="Write your own activity using the planning support, or request an AI suggestion."
                 onChange={(event) => edit('activityDraft', event.target.value)} />
               {state.draftSources.activityDraft && <Provenance origin={state.draftSources.activityDraft.origin} action="suggest_activity" />}
               {state.activityNeedsReview && <div className="notice">Review this activity for alignment with your confirmed inquiry before confirming it.
                 <button className="secondary" disabled={inquiryChanged || busy} onClick={() => dispatch({ type: 'reviewActivity' })}>Review accepted activity</button></div>}
               <button className="secondary confirm-button" disabled={!state.activityDraft.trim() || state.activityNeedsReview || inquiryChanged || busy || !!state.pending}
-                onClick={() => dispatch({ type: 'confirmActivity' })}>Confirm activity</button>
+                onClick={confirmActivity}>Confirm activity</button>
               <p className="field-note">Confirmation means you choose to bring this rehearsal to discussion—not that the team has selected a classroom change.</p>
             </>}
           </div>
         </section>
         <aside className="ai-column" aria-label="Planning support and your decisions">
-          <section className={`suggestion-panel ${state.pending ? 'has-suggestion' : ''}`} tabIndex={-1} aria-labelledby="suggestion-title" aria-busy={busy}>
+          <section ref={targetRef('suggestion-panel')} className={`suggestion-panel ${state.pending ? 'has-suggestion' : ''}`} tabIndex={-1} aria-labelledby="suggestion-title" aria-busy={busy}>
             <div className="ai-panel-heading"><div><span className="eyebrow">{state.pending ? 'For your review / Not confirmed' : 'Optional assistance'}</span>
               <h2 id="suggestion-title" ref={feedback} tabIndex={-1}>{state.pending ? actionNames[currentAction] : 'Planning support'}</h2></div></div>
             <p className="sr-only" role="status">{state.guide && !busy && !state.pending ? 'Guided planning is ready. Your draft is unchanged.' : ''}</p>
@@ -392,23 +499,25 @@ export function Workspace({ onLock }: { onLock: () => void }) {
                 <p>{state.pending.origin === 'demo' ? 'Built-in example ready for review.' : 'AI suggestion ready for review.'}</p>
                 <LiveModelCallout model={state.pending.origin === 'gemini' ? state.pending.model : undefined} />
                 <SuggestionContent suggestion={state.pending.suggestion} />
-                <Sources ids={state.pending.suggestion.sourceIds} />
+                <Sources ids={state.pending.suggestion.sourceIds} onNavigate={navigateToSource} />
                 <div className="uncertainty"><h3>Uncertainty &amp; limits</h3><p>{state.pending.suggestion.limitations}</p></div>
                 <details className="activity-detail more-detail"><summary>More detail</summary>
                   <h3 className="small-heading">Why investigate this?</h3><p>{state.pending.suggestion.rationale}</p></details>
                 <div className="decision-buttons">
-                  <button className="primary" onClick={() => dispatch({ type: 'decide', choice: 'accepted', at: new Date().toISOString() })}>Accept suggestion</button>
-                  <button className="secondary" onClick={() => dispatch({ type: 'decide', choice: 'rejected', at: new Date().toISOString() })}>Reject suggestion</button>
+                  <button className="primary" onClick={() => decide('accepted')}>Accept suggestion</button>
+                  <button className="secondary" onClick={() => decide('rejected')}>Reject suggestion</button>
                 </div><p className="field-note">Accept → editable draft. Reject → your work stays unchanged.</p>
               </> : state.guide && !state.supportBlocked ? <PlanningGuide action={currentAction}
-                examplesAvailable={matchesExampleScenario(state.scenario, sourceIds)}
+                examplesAvailable={matchesExampleScenario(state.scenario, sourceIds)} onNavigate={navigateToSource}
                 onExample={() => {
                   if (state.fallback) dispatch({ type: 'demo', failedRequestId: state.fallback.id,
                     id: crypto.randomUUID(), at: new Date().toISOString() })
                 }} /> : <div className="empty-state">
                 <h3>No suggestion to review</h3>
                 <p>{state.decisions.length ? 'Continue with your draft or request another suggestion. Confirmation is a separate action.'
-                  : 'Use the request button to get feedback on your draft. Review sources and limits before accepting or rejecting.'}</p></div>}
+                  : state.step === 1 ? 'Your evidence and interpretation are ready. Request a challenge to explore an alternative explanation, or use guided planning.'
+                    : state.step === 2 ? 'Request a stronger PLC question, or use guided planning. Review sources and limits before accepting or rejecting.'
+                      : 'Request a rehearsal activity, or use guided planning. Review sources and limits before accepting or rejecting.'}</p></div>}
             {state.error && <p className="error" role="alert">{state.error}</p>}
             {(state.outcome === 'provider_failure' || state.outcome === 'ui_deadline') &&
               <details className="activity-detail service-details"><summary>Service details</summary>
@@ -416,9 +525,12 @@ export function Workspace({ onLock }: { onLock: () => void }) {
                 {state.outcome === 'ui_deadline' && <p>The workspace waiting limit was reached; this does not establish a provider failure. Stopping the browser request does not guarantee provider processing or charges stopped.</p>}
               </details>}
           </section>
-          <section className="decision-trail" aria-label="Decision trail" aria-live="polite">
-            <h2>Your decision trail <span>{state.decisions.length}</span></h2>
-            {!state.decisions.length ? <p>No decisions yet. Accepted and rejected suggestions will appear here.</p> :
+          <section className="decision-trail" aria-label="Decision trail">
+            <div className="trail-heading"><h2>Your decision trail <span>{state.decisions.length}</span></h2>
+              <InfoTip label="About the decision trail">
+                A record of suggestions you accepted or rejected. It is for your reference and is never sent back to the AI.
+              </InfoTip></div>
+            {!state.decisions.length ? <p>No decisions recorded yet. Suggestions you accept or reject will appear here.</p> :
               [...state.decisions].reverse().map((decision) => <details key={decision.id} className="decision-record">
                 <summary><span>{actionNames[decision.suggestion.action]}</span><b>{decision.choice}</b>
                   <span className="status-label">{decision.origin === 'demo' ? 'Built-in example' : 'AI suggestion'}</span>
@@ -438,7 +550,7 @@ export function Workspace({ onLock }: { onLock: () => void }) {
                   {decision.suggestion.probingQuestion}
                 </p>}
                 <p>{decision.suggestion.rationale}</p><p>Limits: {decision.suggestion.limitations}</p>
-                <Sources ids={decision.suggestion.sourceIds} />
+                <Sources ids={decision.suggestion.sourceIds} onNavigate={navigateToSource} />
               </details>)}
           </section>
         </aside>

@@ -179,3 +179,47 @@ footer { border-top: 1px solid var(--line); padding-top: 18px; font-size: 11px; 
   .rail-content { display: block; }
   .gate { padding: 24px; }
 }
+
+/* Guidance: reveal-and-highlight, tooltips, help, and progression hints */
+#interpretation, #inquiry, #activity, .suggestion-panel,
+.assessment-source, .student-work { scroll-margin-top: 80px; }
+.newly-revealed {
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px rgba(16, 115, 106, .55), 0 0 0 6px rgba(16, 115, 106, .16);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .newly-revealed { animation: reveal-settle 1.6s ease forwards; }
+}
+@keyframes reveal-settle {
+  0% { box-shadow: 0 0 0 2px rgba(16, 115, 106, .55), 0 0 0 6px rgba(16, 115, 106, .18); }
+  100% { box-shadow: 0 0 0 2px rgba(16, 115, 106, 0), 0 0 0 6px rgba(16, 115, 106, 0); }
+}
+.info-tip { position: relative; display: inline-flex; vertical-align: middle; margin-left: 4px; }
+.info-tip-trigger {
+  width: 16px; height: 16px; flex: none; padding: 0; border: 1px solid var(--muted); border-radius: 50%;
+  background: transparent; color: var(--muted); font: 700 10px/1 Georgia, "Times New Roman", serif;
+  font-style: normal; text-transform: none; letter-spacing: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.info-tip-trigger:hover, .info-tip-trigger[aria-expanded="true"] { border-color: var(--teal); color: var(--teal); }
+.info-tip-bubble {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 20; width: max-content; max-width: 260px;
+  padding: 10px 12px; background: var(--navy); color: #fff; border-radius: 4px;
+  font: 400 12px/1.5 inherit; letter-spacing: 0; text-transform: none;
+  box-shadow: 0 6px 20px rgba(24, 51, 72, .22);
+}
+.decision-trail .info-tip-bubble, .ai-column .info-tip-bubble { left: auto; right: 0; }
+.how-it-works { margin-top: 14px; }
+.how-it-works > summary { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--teal); cursor: pointer; }
+.how-it-works-steps { margin: 12px 0 8px; padding-left: 20px; font-size: 13px; line-height: 1.7; color: var(--muted); }
+.how-it-works > p { font-size: 12px; color: var(--muted); line-height: 1.6; margin: 0; }
+.step-hint {
+  font-size: 12px; line-height: 1.6; color: var(--muted); margin: 12px 0 0;
+  padding: 8px 12px; background: var(--surface-muted); border-left: 2px solid var(--teal); border-radius: 0 3px 3px 0;
+}
+.label-with-tip { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+.label-with-tip label { margin: 0; }
+.field-heading .label-with-tip { margin: 0; }
+.trail-heading { display: flex; align-items: center; gap: 6px; margin: 28px 0 14px; padding-top: 20px; border-top: 1px solid var(--line); }
+.trail-heading h2 { flex: 1; margin: 0; padding: 0; border: 0; }
+.decision-trail { border-top: 0; margin-top: 0; padding-top: 0; }
