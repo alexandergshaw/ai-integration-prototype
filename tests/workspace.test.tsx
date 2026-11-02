@@ -437,4 +437,42 @@ describe('Workspace interaction and provider-idle boundaries', () => {
       if (transition === 'lock') expect(onLock).toHaveBeenCalledOnce()
     }
   })
+
+  it('shows a loading indicator during a delayed request and sends only one request on repeated clicks', async () => {
+    let finish: ((response: unknown) => void) | undefined
+    fetchMock.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    render(<Workspace onLock={() => {}} />)
+    const button = screen.getByRole('button', { name: 'Challenge my interpretation' })
+    fireEvent.click(button)
+    fireEvent.click(button)
+    fireEvent.click(button)
+    expect((await screen.findAllByText('Reviewing the evidence…')).length).toBeGreaterThan(0)
+    expect(document.querySelector('.suggestion-panel')?.getAttribute('aria-busy')).toBe('true')
+    expect((button as HTMLButtonElement).disabled).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const requestId = JSON.parse(fetchMock.mock.calls[0][1].body).requestId
+    await act(async () => { finish?.({ ok: true, json: async () => ({ id: crypto.randomUUID(), requestId, suggestion: challenge }) }) })
+    expect(screen.queryByText('Reviewing the evidence…')).toBeNull()
+    expect(await screen.findByRole('button', { name: 'Accept suggestion' })).toBeTruthy()
+  })
+
+  it('accepts AI then restores the exact original interpretation, keeping both reversible', async () => {
+    const user = userEvent.setup()
+    render(<Workspace onLock={() => {}} />)
+    const original = initialState.educatorInterpretation
+    modelResponse(challenge)
+    await user.click(screen.getByRole('button', { name: 'Challenge my interpretation' }))
+    await user.click(await screen.findByRole('button', { name: 'Accept suggestion' }))
+    expect(screen.getByText('Using AI interpretation.')).toBeTruthy()
+    expect((screen.getByLabelText('Your Interpretation') as HTMLTextAreaElement).value)
+      .toBe(challenge.action === 'challenge' && challenge.revisedInterpretation)
+    await user.click(screen.getByRole('button', { name: 'Use my original interpretation' }))
+    expect(screen.getByText('Using your interpretation.')).toBeTruthy()
+    expect((screen.getByLabelText('Your Interpretation') as HTMLTextAreaElement).value).toBe(original)
+    await user.click(screen.getByRole('button', { name: 'Use AI interpretation' }))
+    expect(screen.getByText('Using AI interpretation.')).toBeTruthy()
+    expect((screen.getByLabelText('Your Interpretation') as HTMLTextAreaElement).value)
+      .toBe(challenge.action === 'challenge' && challenge.revisedInterpretation)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })

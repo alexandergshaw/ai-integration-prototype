@@ -272,3 +272,53 @@ describe('Confirmation and stale-response boundaries', () => {
     expect(suggestionSchema.safeParse({ ...rehearsal, activity: { ...rehearsal.activity, steps: [{ minutes: 5, instruction: 'A' }, { minutes: 4, instruction: 'B' }] } }).success).toBe(false)
   })
 })
+
+describe('Reversible AI interpretation', () => {
+  if (challenge.action !== 'challenge') throw new Error('Wrong test fixture')
+  const aiText = challenge.revisedInterpretation
+
+  it('preserves the original interpretation and selects the AI version on first acceptance', () => {
+    const accepted = decide(receive(initialState, challenge), 'accepted')
+    expect(accepted.interpretationSource).toBe('ai')
+    expect(accepted.originalInterpretation).toBe(initialState.educatorInterpretation)
+    expect(accepted.aiInterpretation).toBe(aiText)
+    expect(accepted.educatorInterpretation).toBe(aiText)
+  })
+
+  it('restores the exact original without a new request and keeps the AI version available', () => {
+    const accepted = decide(receive(initialState, challenge), 'accepted')
+    const restored = reducer(accepted, { type: 'selectInterpretation', source: 'mine' })
+    expect(restored.interpretationSource).toBe('mine')
+    expect(restored.educatorInterpretation).toBe(initialState.educatorInterpretation)
+    expect(restored.aiInterpretation).toBe(aiText)
+    expect(restored.originalInterpretation).toBe(initialState.educatorInterpretation)
+  })
+
+  it('preserves both versions and AI edits across repeated switching', () => {
+    const accepted = decide(receive(initialState, challenge), 'accepted')
+    const editedAi = reducer(accepted, { type: 'edit', field: 'educatorInterpretation', value: 'AI draft, educator-edited.' })
+    expect(editedAi.aiInterpretation).toBe('AI draft, educator-edited.')
+    const toMine = reducer(editedAi, { type: 'selectInterpretation', source: 'mine' })
+    expect(toMine.educatorInterpretation).toBe(initialState.educatorInterpretation)
+    const backToAi = reducer(toMine, { type: 'selectInterpretation', source: 'ai' })
+    expect(backToAi.educatorInterpretation).toBe('AI draft, educator-edited.')
+    expect(backToAi.originalInterpretation).toBe(initialState.educatorInterpretation)
+  })
+
+  it('keeps the first original when a later suggestion is accepted and never auto-accepts a regeneration', () => {
+    const accepted = decide(receive(initialState, challenge), 'accepted')
+    const restored = reducer(accepted, { type: 'selectInterpretation', source: 'mine' })
+    const regenerated = receive(restored, challenge)
+    expect(regenerated.pending).not.toBeNull()
+    expect(regenerated.interpretationSource).toBe('mine')
+    expect(regenerated.educatorInterpretation).toBe(initialState.educatorInterpretation)
+    const reaccepted = decide(regenerated, 'accepted')
+    expect(reaccepted.originalInterpretation).toBe(initialState.educatorInterpretation)
+    expect(reaccepted.interpretationSource).toBe('ai')
+  })
+
+  it('ignores interpretation switching before any AI version exists', () => {
+    expect(reducer(initialState, { type: 'selectInterpretation', source: 'ai' })).toBe(initialState)
+    expect(reducer(initialState, { type: 'selectInterpretation', source: 'mine' })).toBe(initialState)
+  })
+})
